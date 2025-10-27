@@ -16,23 +16,36 @@ Get up and running with Phase 1 in under 5 minutes.
 cd /path/to/medical-robotics-data-platform
 ```
 
-### 2. Install Dependencies
+### 2. Set Up Virtual Environment
 
 ```bash
 cd phase1-data-model
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate it
+source venv/bin/activate  # On Linux/Mac
+# venv\Scripts\activate   # On Windows
+```
+
+### 3. Install Dependencies
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Generate Data
+### 4. Generate Data
 
 ```bash
 cd data_generators
-python generate_all.py
+python3 generate_all.py
 ```
 
 This will create approximately 460,000+ records across 5 datasets in about 10-30 seconds.
 
-### 4. Verify Generated Data
+### 5. Verify Generated Data
 
 ```bash
 ls -lh sample_data/
@@ -45,7 +58,7 @@ You should see:
 - `procedure_outcomes.csv` (~400 KB)
 - `procedure_telemetry.json` (~50 MB)
 
-### 5. Explore the Data
+### 6. Explore the Data
 
 **View robots:**
 ```bash
@@ -100,8 +113,11 @@ python generate_all.py
 ## Troubleshooting
 
 **ModuleNotFoundError:**
+Make sure your virtual environment is activated:
 ```bash
-pip install -r ../requirements.txt
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
+pip install -r requirements.txt
 ```
 
 **Permission denied:**
@@ -111,6 +127,12 @@ chmod +x generate_all.py
 
 **Out of memory (telemetry generation):**
 Reduce `TELEMETRY_SAMPLES_PER_PROCEDURE` in `config.py` to 50 or 25.
+
+**Python version issues:**
+Use Python 3.11 or 3.12 for best compatibility. Create venv with specific version:
+```bash
+python3.11 -m venv venv  # or python3.12
+```
 
 ## Help
 

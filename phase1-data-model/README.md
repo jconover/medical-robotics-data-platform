@@ -67,17 +67,34 @@ See `data_model/schema.md` for complete entity definitions and relationships.
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.8 or higher (Python 3.11+ recommended)
 - pip (Python package manager)
 
 ### Installation
 
-1. Install Python dependencies:
+1. **Create a virtual environment** (recommended):
 
 ```bash
 cd phase1-data-model
+
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+# On Linux/Mac:
+source venv/bin/activate
+# On Windows:
+# venv\Scripts\activate
+```
+
+2. **Install Python dependencies**:
+
+```bash
+pip install --upgrade pip
 pip install -r requirements.txt
 ```
+
+**Note**: If you encounter issues installing pandas on Python 3.13+, the installer will automatically use the latest compatible version with pre-built wheels.
 
 ### Generating Data
 
