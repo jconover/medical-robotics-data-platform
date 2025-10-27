@@ -28,6 +28,9 @@ env/
 phase1-data-model/sample_data/*.csv
 phase1-data-model/sample_data/*.json
 phase1-data-model/sample_data/*.parquet
+phase1-data-model/data_generators/sample_data/*.csv
+phase1-data-model/data_generators/sample_data/*.json
+phase1-data-model/data_generators/sample_data/*.parquet
 
 # IDE
 .vscode/
