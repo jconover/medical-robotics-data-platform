@@ -81,6 +81,7 @@ main() {
     warn "Region: $AWS_REGION"
     warn ""
     warn "This includes:"
+    warn "  - Bastion Host (if deployed)"
     warn "  - RDS Database (and all data)"
     warn "  - S3 Buckets (and all data)"
     warn "  - VPC and all networking"
@@ -109,23 +110,27 @@ main() {
 
     # Delete stacks in reverse order
     info ""
-    info "Step 1/5: Deleting RDS stack..."
+    info "Step 1/6: Deleting Bastion Host stack (if exists)..."
+    delete_stack "${ENVIRONMENT_NAME}-bastion"
+
+    info ""
+    info "Step 2/6: Deleting RDS stack..."
     delete_stack "${ENVIRONMENT_NAME}-rds"
 
     info ""
-    info "Step 2/5: Deleting IAM stack..."
+    info "Step 3/6: Deleting IAM stack..."
     delete_stack "${ENVIRONMENT_NAME}-iam"
 
     info ""
-    info "Step 3/5: Deleting S3 stack..."
+    info "Step 4/6: Deleting S3 stack..."
     delete_stack "${ENVIRONMENT_NAME}-s3"
 
     info ""
-    info "Step 4/5: Deleting Security Groups stack..."
+    info "Step 5/6: Deleting Security Groups stack..."
     delete_stack "${ENVIRONMENT_NAME}-security-groups"
 
     info ""
-    info "Step 5/5: Deleting Network stack..."
+    info "Step 6/6: Deleting Network stack..."
     delete_stack "${ENVIRONMENT_NAME}-network"
 
     info ""
