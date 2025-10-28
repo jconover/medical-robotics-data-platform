@@ -1,0 +1,293 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - S3 Data Lake Buckets'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+Resources:
+  # Raw Data Bucket (telemetry, sensor data)
+  RawDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-raw-data-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 180
+                StorageClass: GLACIER
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 90
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-raw-data'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: DataClassification
+          Value: raw
+
+  # Processed Data Bucket (cleaned, transformed data)
+  ProcessedDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-processed-data-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 60
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-processed-data'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: DataClassification
+          Value: processed
+
+  # Analytics Bucket (aggregated, query results)
+  AnalyticsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-analytics-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionToIA
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-analytics'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: DataClassification
+          Value: analytics
+
+  # Application Logs Bucket
+  LogsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-logs-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireLogs
+            Status: Enabled
+            ExpirationInDays: 90
+          - Id: TransitionLogs
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-logs'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: DataClassification
+          Value: logs
+
+  # Backup Bucket (database backups, snapshots)
+  BackupBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${EnvironmentName}-backups-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: TransitionBackups
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 7
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 30
+                StorageClass: GLACIER
+              - TransitionInDays: 90
+                StorageClass: DEEP_ARCHIVE
+          - Id: ExpireOldBackups
+            Status: Enabled
+            ExpirationInDays: 365
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-backups'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: DataClassification
+          Value: backup
+
+  # Bucket Policy for Raw Data (allow specific access patterns)
+  RawDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref RawDataBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${RawDataBucket.Arn}/*'
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: AES256
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt RawDataBucket.Arn
+              - !Sub '${RawDataBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  # Bucket Policy for Processed Data
+  ProcessedDataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ProcessedDataBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyUnencryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Sub '${ProcessedDataBucket.Arn}/*'
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: AES256
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt ProcessedDataBucket.Arn
+              - !Sub '${ProcessedDataBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+Outputs:
+  RawDataBucket:
+    Description: S3 Bucket for raw telemetry and sensor data
+    Value: !Ref RawDataBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-raw-data-bucket'
+
+  RawDataBucketArn:
+    Description: ARN of raw data bucket
+    Value: !GetAtt RawDataBucket.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+
+  ProcessedDataBucket:
+    Description: S3 Bucket for processed and transformed data
+    Value: !Ref ProcessedDataBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-processed-data-bucket'
+
+  ProcessedDataBucketArn:
+    Description: ARN of processed data bucket
+    Value: !GetAtt ProcessedDataBucket.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+
+  AnalyticsBucket:
+    Description: S3 Bucket for analytics and query results
+    Value: !Ref AnalyticsBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-analytics-bucket'
+
+  AnalyticsBucketArn:
+    Description: ARN of analytics bucket
+    Value: !GetAtt AnalyticsBucket.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-analytics-bucket-arn'
+
+  LogsBucket:
+    Description: S3 Bucket for application logs
+    Value: !Ref LogsBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-logs-bucket'
+
+  LogsBucketArn:
+    Description: ARN of logs bucket
+    Value: !GetAtt LogsBucket.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-logs-bucket-arn'
+
+  BackupBucket:
+    Description: S3 Bucket for backups and snapshots
+    Value: !Ref BackupBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-backup-bucket'
+
+  BackupBucketArn:
+    Description: ARN of backup bucket
+    Value: !GetAtt BackupBucket.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-backup-bucket-arn'

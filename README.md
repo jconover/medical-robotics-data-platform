@@ -61,14 +61,17 @@ Surgical Robots (Simulated)
 
 [📁 View Phase 1](./phase1-data-model/)
 
-### 🚧 Phase 2: Core Infrastructure (CloudFormation)
-**Status**: Planned
+### ✅ Phase 2: Core Infrastructure (CloudFormation)
+**Status**: Complete
 
-- VPC, subnets, security groups
-- RDS PostgreSQL setup
-- S3 buckets (raw data, processed data, logs)
-- IAM roles and policies
-- Basic monitoring with CloudWatch
+- VPC with public, private, and data subnets across 2 AZs
+- Security groups for ALB, ECS, RDS, Redshift, and bastion
+- S3 data lake (raw, processed, analytics, logs, backups)
+- IAM roles for ECS, Lambda, Redshift, and data pipelines
+- RDS PostgreSQL database with automated backups
+- SQL schemas and deployment automation scripts
+
+[📁 View Phase 2](./phase2-infrastructure/)
 
 ### 🚧 Phase 3: Container Infrastructure (ECS)
 **Status**: Planned
@@ -208,5 +211,5 @@ GitHub: [Your GitHub Profile]
 
 ---
 
-**Current Status**: Phase 1 Complete ✅
+**Current Status**: Phase 2 Complete ✅
 **Last Updated**: 2025-10-27

@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - Master Stack (deploys all nested stacks)'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  DBUsername:
+    Description: Database master username
+    Type: String
+    Default: dbadmin
+    NoEcho: true
+
+  DBPassword:
+    Description: Database master password
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+
+  DBInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+
+  CloudFormationTemplatesBucket:
+    Description: S3 bucket containing nested CloudFormation templates
+    Type: String
+
+Resources:
+  # VPC and Networking Stack
+  NetworkStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://s3.amazonaws.com/${CloudFormationTemplatesBucket}/cloudformation/01-vpc-network.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-network-stack'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Security Groups Stack
+  SecurityGroupsStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: NetworkStack
+    Properties:
+      TemplateURL: !Sub 'https://s3.amazonaws.com/${CloudFormationTemplatesBucket}/cloudformation/02-security-groups.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-security-groups-stack'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # S3 Buckets Stack
+  S3Stack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub 'https://s3.amazonaws.com/${CloudFormationTemplatesBucket}/cloudformation/03-s3-buckets.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-s3-stack'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # IAM Roles Stack
+  IAMStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn: S3Stack
+    Properties:
+      TemplateURL: !Sub 'https://s3.amazonaws.com/${CloudFormationTemplatesBucket}/cloudformation/04-iam-roles.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-iam-stack'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # RDS PostgreSQL Stack
+  RDSStack:
+    Type: AWS::CloudFormation::Stack
+    DependsOn:
+      - NetworkStack
+      - SecurityGroupsStack
+    Properties:
+      TemplateURL: !Sub 'https://s3.amazonaws.com/${CloudFormationTemplatesBucket}/cloudformation/05-rds-postgres.yaml'
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        DBUsername: !Ref DBUsername
+        DBPassword: !Ref DBPassword
+        DBInstanceClass: !Ref DBInstanceClass
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-rds-stack'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !GetAtt NetworkStack.Outputs.VPC
+    Export:
+      Name: !Sub '${EnvironmentName}-master-vpc-id'
+
+  RDSEndpoint:
+    Description: RDS Database Endpoint
+    Value: !GetAtt RDSStack.Outputs.DBEndpoint
+    Export:
+      Name: !Sub '${EnvironmentName}-master-rds-endpoint'
+
+  RawDataBucket:
+    Description: S3 Raw Data Bucket
+    Value: !GetAtt S3Stack.Outputs.RawDataBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-master-raw-bucket'
+
+  ProcessedDataBucket:
+    Description: S3 Processed Data Bucket
+    Value: !GetAtt S3Stack.Outputs.ProcessedDataBucket
+    Export:
+      Name: !Sub '${EnvironmentName}-master-processed-bucket'
+
+  StackStatus:
+    Description: Master stack deployment status
+    Value: Complete

@@ -1,0 +1,303 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - IAM Roles and Policies'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+Resources:
+  # ECS Task Execution Role (for ECS to pull images, write logs)
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-ecs-task-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-ecs-task-execution-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # ECS Task Role (for application code to access AWS resources)
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-ecs-task-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3DataAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ecs/${EnvironmentName}/*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-ecs-task-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Lambda Execution Role (for ETL functions)
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-lambda-execution-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: S3ETLAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+        - PolicyName: RDSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-lambda-execution-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Redshift Role (for Redshift to access S3)
+  RedshiftRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-redshift-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: redshift.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RedshiftS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-analytics-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-analytics-bucket-arn'
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-analytics-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-analytics-bucket-arn'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Data Pipeline Role (for AWS Data Pipeline or Step Functions)
+  DataPipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-data-pipeline-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - datapipeline.amazonaws.com
+                - states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DataPipelineAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket-arn'
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket-arn'
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${EnvironmentName}-*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-data-pipeline-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # CloudWatch Events Role (for scheduled tasks)
+  CloudWatchEventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-cloudwatch-events-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeECSTasks
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !GetAtt ECSTaskExecutionRole.Arn
+                  - !GetAtt ECSTaskRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-cloudwatch-events-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+Outputs:
+  ECSTaskExecutionRoleArn:
+    Description: ARN of ECS Task Execution Role
+    Value: !GetAtt ECSTaskExecutionRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ecs-task-execution-role-arn'
+
+  ECSTaskRoleArn:
+    Description: ARN of ECS Task Role
+    Value: !GetAtt ECSTaskRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ecs-task-role-arn'
+
+  LambdaExecutionRoleArn:
+    Description: ARN of Lambda Execution Role
+    Value: !GetAtt LambdaExecutionRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-lambda-execution-role-arn'
+
+  RedshiftRoleArn:
+    Description: ARN of Redshift IAM Role
+    Value: !GetAtt RedshiftRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-role-arn'
+
+  DataPipelineRoleArn:
+    Description: ARN of Data Pipeline Role
+    Value: !GetAtt DataPipelineRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-data-pipeline-role-arn'
+
+  CloudWatchEventsRoleArn:
+    Description: ARN of CloudWatch Events Role
+    Value: !GetAtt CloudWatchEventsRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-cloudwatch-events-role-arn'

@@ -1,0 +1,240 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - RDS PostgreSQL Database'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  DBInstanceClass:
+    Description: Database instance class
+    Type: String
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.t3.large
+      - db.r5.large
+      - db.r5.xlarge
+
+  DBAllocatedStorage:
+    Description: Allocated storage in GB
+    Type: Number
+    Default: 20
+    MinValue: 20
+    MaxValue: 1000
+
+  DBName:
+    Description: Database name
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+
+  DBUsername:
+    Description: Database master username
+    Type: String
+    Default: dbadmin
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    NoEcho: true
+
+  DBPassword:
+    Description: Database master password
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9]*'
+    ConstraintDescription: Must be between 8 and 41 alphanumeric characters
+
+  BackupRetentionPeriod:
+    Description: Number of days to retain automated backups
+    Type: Number
+    Default: 7
+    MinValue: 1
+    MaxValue: 35
+
+  MultiAZ:
+    Description: Enable Multi-AZ deployment for high availability
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+
+Resources:
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub '${EnvironmentName}-db-subnet-group'
+      DBSubnetGroupDescription: Subnet group for RDS PostgreSQL
+      SubnetIds:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-data-subnet-1'
+        - Fn::ImportValue: !Sub '${EnvironmentName}-data-subnet-2'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-subnet-group'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # DB Parameter Group
+  DBParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Custom parameter group for PostgreSQL
+      Family: postgres15
+      Parameters:
+        shared_preload_libraries: pg_stat_statements
+        log_statement: all
+        log_min_duration_statement: 1000
+        max_connections: 100
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-db-parameter-group'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # DB Instance
+  DBInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: !Sub '${EnvironmentName}-postgres'
+      DBName: !Ref DBName
+      Engine: postgres
+      EngineVersion: '15.5'
+      DBInstanceClass: !Ref DBInstanceClass
+      AllocatedStorage: !Ref DBAllocatedStorage
+      StorageType: gp3
+      StorageEncrypted: true
+      MasterUsername: !Ref DBUsername
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      DBParameterGroupName: !Ref DBParameterGroup
+      VPCSecurityGroups:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-rds-sg-id'
+      MultiAZ: !Ref MultiAZ
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod
+      PreferredBackupWindow: '03:00-04:00'
+      PreferredMaintenanceWindow: 'sun:04:00-sun:05:00'
+      EnableCloudwatchLogsExports:
+        - postgresql
+      DeletionProtection: false
+      PubliclyAccessible: false
+      CopyTagsToSnapshot: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-postgres'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # CloudWatch Alarms
+  DatabaseCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-rds-cpu-alarm'
+      AlarmDescription: Alert when database CPU exceeds 80%
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+
+  DatabaseStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-rds-storage-alarm'
+      AlarmDescription: Alert when database free storage is low
+      MetricName: FreeStorageSpace
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 2000000000  # 2 GB in bytes
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+
+  DatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-rds-connections-alarm'
+      AlarmDescription: Alert when database connections exceed 80% of max
+      MetricName: DatabaseConnections
+      Namespace: AWS/RDS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Ref DBInstance
+
+  # Secrets Manager Secret for DB Credentials
+  DBSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${EnvironmentName}/rds/credentials'
+      Description: RDS PostgreSQL database credentials
+      SecretString: !Sub |
+        {
+          "username": "${DBUsername}",
+          "password": "${DBPassword}",
+          "engine": "postgres",
+          "host": "${DBInstance.Endpoint.Address}",
+          "port": ${DBInstance.Endpoint.Port},
+          "dbname": "${DBName}"
+        }
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-rds-secret'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+Outputs:
+  DBInstanceId:
+    Description: RDS Instance ID
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-instance-id'
+
+  DBEndpoint:
+    Description: RDS Endpoint Address
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-endpoint'
+
+  DBPort:
+    Description: RDS Port
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-port'
+
+  DBName:
+    Description: Database Name
+    Value: !Ref DBName
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-dbname'
+
+  DBSecretArn:
+    Description: ARN of Secrets Manager secret containing DB credentials
+    Value: !Ref DBSecret
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-secret-arn'
+
+  DBConnectionString:
+    Description: PostgreSQL connection string (password in Secrets Manager)
+    Value: !Sub 'postgresql://${DBUsername}:****@${DBInstance.Endpoint.Address}:${DBInstance.Endpoint.Port}/${DBName}'

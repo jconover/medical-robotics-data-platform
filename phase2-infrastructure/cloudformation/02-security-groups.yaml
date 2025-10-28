@@ -1,0 +1,184 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - Security Groups'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+Resources:
+  # ALB Security Group
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-alb-sg'
+      GroupDescription: Security group for Application Load Balancer
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP from anywhere
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS from anywhere
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-alb-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # ECS/Application Security Group
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-ecs-sg'
+      GroupDescription: Security group for ECS tasks and containers
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow traffic from ALB
+        - IpProtocol: tcp
+          FromPort: 5000
+          ToPort: 5000
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow API traffic from ALB
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-ecs-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # RDS Security Group
+  RDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-rds-sg'
+      GroupDescription: Security group for RDS PostgreSQL database
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow PostgreSQL from ECS tasks
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-rds-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Allow RDS to accept connections from itself (for replication, backups)
+  RDSSecurityGroupSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref RDSSecurityGroup
+      Description: Allow RDS internal communication
+
+  # Redshift Security Group
+  RedshiftSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-redshift-sg'
+      GroupDescription: Security group for Redshift cluster
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5439
+          ToPort: 5439
+          SourceSecurityGroupId: !Ref ECSSecurityGroup
+          Description: Allow Redshift from ECS tasks
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Bastion Host Security Group (for administrative access)
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-bastion-sg'
+      GroupDescription: Security group for bastion host
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH from anywhere (restrict in production)
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Allow RDS access from Bastion
+  RDSBastionIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RDSSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+      Description: Allow PostgreSQL from Bastion host
+
+  # Allow Redshift access from Bastion
+  RedshiftBastionIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RedshiftSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5439
+      ToPort: 5439
+      SourceSecurityGroupId: !Ref BastionSecurityGroup
+      Description: Allow Redshift from Bastion host
+
+Outputs:
+  ALBSecurityGroup:
+    Description: Security Group ID for Application Load Balancer
+    Value: !Ref ALBSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-alb-sg-id'
+
+  ECSSecurityGroup:
+    Description: Security Group ID for ECS Tasks
+    Value: !Ref ECSSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-ecs-sg-id'
+
+  RDSSecurityGroup:
+    Description: Security Group ID for RDS PostgreSQL
+    Value: !Ref RDSSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-sg-id'
+
+  RedshiftSecurityGroup:
+    Description: Security Group ID for Redshift Cluster
+    Value: !Ref RedshiftSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-sg-id'
+
+  BastionSecurityGroup:
+    Description: Security Group ID for Bastion Host
+    Value: !Ref BastionSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-bastion-sg-id'
