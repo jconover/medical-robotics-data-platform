@@ -73,14 +73,18 @@ Surgical Robots (Simulated)
 
 [📁 View Phase 2](./phase2-infrastructure/)
 
-### 🚧 Phase 3: Container Infrastructure (ECS)
-**Status**: Planned
+### ✅ Phase 3: Container Infrastructure (ECS)
+**Status**: Complete
 
-- ECS cluster configuration
-- Data ingestion service (containerized)
-- API service for querying data
-- Load balancing and auto-scaling
-- Container logging and monitoring
+- ECS Fargate cluster with Container Insights
+- Data ingestion service (Flask + Docker)
+- API service for querying data (Flask + Docker)
+- Application Load Balancer with path-based routing
+- Auto-scaling based on CPU utilization
+- CloudWatch logs and monitoring dashboard
+- Build and deployment automation scripts
+
+[📁 View Phase 3](./phase3-ecs/)
 
 ### 🚧 Phase 4: Data Warehouse (Redshift)
 **Status**: Planned
@@ -211,5 +215,5 @@ GitHub: [Your GitHub Profile]
 
 ---
 
-**Current Status**: Phase 2 Complete ✅
+**Current Status**: Phase 3 Complete ✅
 **Last Updated**: 2025-10-27

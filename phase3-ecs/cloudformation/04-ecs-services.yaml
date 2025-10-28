@@ -26,7 +26,6 @@ Resources:
   # Data Ingestion Service
   DataIngestionService:
     Type: AWS::ECS::Service
-    DependsOn: DataIngestionListenerRule
     Properties:
       ServiceName: !Sub '${EnvironmentName}-data-ingestion'
       Cluster:
@@ -65,7 +64,6 @@ Resources:
   # API Service
   APIService:
     Type: AWS::ECS::Service
-    DependsOn: APIListenerRule
     Properties:
       ServiceName: !Sub '${EnvironmentName}-api-service'
       Cluster:
@@ -156,37 +154,6 @@ Resources:
         TargetValue: 70
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
-
-  # Reference to ALB listener rules (to ensure ordering)
-  DataIngestionListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      ListenerArn:
-        Fn::ImportValue: !Sub '${EnvironmentName}-alb-listener-arn'
-      Priority: 20
-      Conditions:
-        - Field: path-pattern
-          Values:
-            - /ingest/*
-      Actions:
-        - Type: forward
-          TargetGroupArn:
-            Fn::ImportValue: !Sub '${EnvironmentName}-ingestion-target-group-arn'
-
-  APIListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      ListenerArn:
-        Fn::ImportValue: !Sub '${EnvironmentName}-alb-listener-arn'
-      Priority: 10
-      Conditions:
-        - Field: path-pattern
-          Values:
-            - /api/*
-      Actions:
-        - Type: forward
-          TargetGroupArn:
-            Fn::ImportValue: !Sub '${EnvironmentName}-api-target-group-arn'
 
 Outputs:
   DataIngestionServiceName:

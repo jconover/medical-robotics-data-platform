@@ -35,6 +35,7 @@ def get_db_connection():
     )
 
 @app.route('/health', methods=['GET'])
+@app.route('/ingest/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({'status': 'healthy', 'service': 'data-ingestion'}), 200
