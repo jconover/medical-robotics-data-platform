@@ -157,11 +157,11 @@ Resources:
           - Id: TransitionBackups
             Status: Enabled
             Transitions:
-              - TransitionInDays: 7
-                StorageClass: STANDARD_IA
               - TransitionInDays: 30
+                StorageClass: STANDARD_IA
+              - TransitionInDays: 60
                 StorageClass: GLACIER
-              - TransitionInDays: 90
+              - TransitionInDays: 180
                 StorageClass: DEEP_ARCHIVE
           - Id: ExpireOldBackups
             Status: Enabled
