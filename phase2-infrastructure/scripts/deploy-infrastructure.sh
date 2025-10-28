@@ -11,6 +11,7 @@ AWS_REGION="${AWS_REGION:-us-east-1}"
 DB_USERNAME="${DB_USERNAME:-dbadmin}"
 DB_PASSWORD="${DB_PASSWORD}"
 DB_INSTANCE_CLASS="${DB_INSTANCE_CLASS:-db.t3.micro}"
+DEPLOY_BASTION="${DEPLOY_BASTION:-false}"  # Set to "true" to deploy bastion host
 
 # Colors for output
 RED='\033[0;31m'
@@ -124,50 +125,90 @@ main() {
 
     # Deploy stacks in order
     info ""
-    info "Step 1/5: Deploying VPC and Networking..."
+    info "Step 1/6: Deploying VPC and Networking..."
     deploy_stack \
         "${ENVIRONMENT_NAME}-network" \
         "$CF_DIR/01-vpc-network.yaml" \
         "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME"
 
     info ""
-    info "Step 2/5: Deploying Security Groups..."
+    info "Step 2/6: Deploying Security Groups..."
     deploy_stack \
         "${ENVIRONMENT_NAME}-security-groups" \
         "$CF_DIR/02-security-groups.yaml" \
         "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME"
 
     info ""
-    info "Step 3/5: Deploying S3 Buckets..."
+    info "Step 3/6: Deploying S3 Buckets..."
     deploy_stack \
         "${ENVIRONMENT_NAME}-s3" \
         "$CF_DIR/03-s3-buckets.yaml" \
         "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME"
 
     info ""
-    info "Step 4/5: Deploying IAM Roles..."
+    info "Step 4/6: Deploying IAM Roles..."
     deploy_stack \
         "${ENVIRONMENT_NAME}-iam" \
         "$CF_DIR/04-iam-roles.yaml" \
         "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME"
 
     info ""
-    info "Step 5/5: Deploying RDS PostgreSQL..."
+    info "Step 5/6: Deploying RDS PostgreSQL..."
     deploy_stack \
         "${ENVIRONMENT_NAME}-rds" \
         "$CF_DIR/05-rds-postgres.yaml" \
         "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME ParameterKey=DBUsername,ParameterValue=$DB_USERNAME ParameterKey=DBPassword,ParameterValue=$DB_PASSWORD ParameterKey=DBInstanceClass,ParameterValue=$DB_INSTANCE_CLASS"
+
+    # Optional: Deploy bastion host
+    if [ "$DEPLOY_BASTION" = "true" ]; then
+        info ""
+        info "Step 6/6: Deploying Bastion Host (Optional)..."
+        deploy_stack \
+            "${ENVIRONMENT_NAME}-bastion" \
+            "$CF_DIR/06-bastion-host.yaml" \
+            "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME"
+
+        info ""
+        info "Bastion host deployed! Connect with:"
+        BASTION_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${ENVIRONMENT_NAME}-bastion" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].Outputs[?OutputKey==`BastionInstanceId`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+
+        if [ -n "$BASTION_ID" ]; then
+            info "  aws ssm start-session --target $BASTION_ID --region $AWS_REGION"
+        fi
+    else
+        info ""
+        info "Step 6/6: Bastion Host (Skipped)"
+        info "To deploy bastion later, run: export DEPLOY_BASTION=true && ./deploy-infrastructure.sh"
+        info "Or deploy manually - see BASTION-QUICKSTART.md"
+    fi
 
     info ""
     info "========================================"
     info "Deployment Complete!"
     info "========================================"
     info ""
-    info "Next steps:"
-    info "1. Verify stacks in AWS Console CloudFormation"
-    info "2. Get RDS endpoint: aws cloudformation describe-stacks --stack-name ${ENVIRONMENT_NAME}-rds --query 'Stacks[0].Outputs'"
-    info "3. Run SQL schema: psql -h <endpoint> -U $DB_USERNAME -d medrobotics -f ../sql-schemas/01-create-tables.sql"
-    info "4. Load sample data from Phase 1"
+    info "RDS is in a PRIVATE subnet and cannot be accessed directly from your local machine."
+    info ""
+    info "To access RDS and create the database schema, you have two options:"
+    info ""
+    info "Option 1 (RECOMMENDED): Deploy a bastion host"
+    info "  cd $CF_DIR"
+    info "  aws cloudformation create-stack --stack-name ${ENVIRONMENT_NAME}-bastion --template-body file://06-bastion-host.yaml --parameters ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME --capabilities CAPABILITY_NAMED_IAM --region $AWS_REGION"
+    info "  aws cloudformation wait stack-create-complete --stack-name ${ENVIRONMENT_NAME}-bastion --region $AWS_REGION"
+    info ""
+    info "  Then connect: aws ssm start-session --target \$(aws cloudformation describe-stacks --stack-name ${ENVIRONMENT_NAME}-bastion --query 'Stacks[0].Outputs[?OutputKey==\`BastionInstanceId\`].OutputValue' --output text) --region $AWS_REGION"
+    info ""
+    info "Option 2: Use ECS task with exec enabled (Phase 3)"
+    info ""
+    info "See BASTION-QUICKSTART.md for detailed instructions."
+    info ""
+    info "Other resources:"
+    info "  - View all outputs: aws cloudformation describe-stacks --stack-name ${ENVIRONMENT_NAME}-rds --query 'Stacks[0].Outputs' --region $AWS_REGION"
+    info "  - S3 buckets: aws cloudformation describe-stacks --stack-name ${ENVIRONMENT_NAME}-s3 --query 'Stacks[0].Outputs' --region $AWS_REGION"
 }
 
 # Run main function

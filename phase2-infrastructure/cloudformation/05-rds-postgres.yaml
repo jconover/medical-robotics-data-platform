@@ -85,7 +85,7 @@ Resources:
     Type: AWS::RDS::DBParameterGroup
     Properties:
       Description: Custom parameter group for PostgreSQL
-      Family: postgres15
+      Family: postgres17
       Parameters:
         shared_preload_libraries: pg_stat_statements
         log_statement: all

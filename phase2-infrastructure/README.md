@@ -190,27 +190,66 @@ aws cloudformation create-stack \
 
 ## Post-Deployment Steps
 
-### 1. Get RDS Endpoint
+### Important: RDS is in Private Subnet
 
-```bash
-aws cloudformation describe-stacks \
-  --stack-name medrobotics-rds \
-  --query 'Stacks[0].Outputs[?OutputKey==`DBEndpoint`].OutputValue' \
-  --output text
+Your RDS instance is deployed in **private subnets** and **cannot be accessed directly** from your local machine for security. You'll see this error if you try:
+
+```
+psql: error: could not translate host name "..." to address: No address associated with hostname
 ```
 
-### 2. Create Database Schema
+**Solution**: Deploy a bastion host to access RDS. See [BASTION-QUICKSTART.md](BASTION-QUICKSTART.md) for detailed instructions.
+
+### 1. Deploy Bastion Host (Required for Database Access)
+
+```bash
+cd phase2-infrastructure/cloudformation
+
+# Deploy bastion host
+aws cloudformation create-stack \
+  --stack-name medrobotics-bastion \
+  --template-body file://06-bastion-host.yaml \
+  --parameters ParameterKey=EnvironmentName,ParameterValue=medrobotics \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region us-east-1
+
+# Wait for completion
+aws cloudformation wait stack-create-complete \
+  --stack-name medrobotics-bastion \
+  --region us-east-1
+```
+
+### 2. Connect to Bastion
+
+```bash
+# Get bastion instance ID
+BASTION_ID=$(aws cloudformation describe-stacks \
+  --stack-name medrobotics-bastion \
+  --query 'Stacks[0].Outputs[?OutputKey==`BastionInstanceId`].OutputValue' \
+  --output text)
+
+# Connect via AWS Systems Manager (no SSH key needed!)
+aws ssm start-session --target $BASTION_ID --region us-east-1
+```
+
+### 3. Create Database Schema (from Bastion)
+
+Once connected to the bastion host:
 
 ```bash
 # Get the RDS endpoint
 RDS_ENDPOINT=$(aws cloudformation describe-stacks \
   --stack-name medrobotics-rds \
+  --region us-east-1 \
   --query 'Stacks[0].Outputs[?OutputKey==`DBEndpoint`].OutputValue' \
   --output text)
 
-# Connect and create schema
-psql -h $RDS_ENDPOINT -U dbadmin -d medrobotics -f ../sql-schemas/01-create-tables.sql
+# Upload your SQL schema file to /tmp (copy-paste or use S3)
+# Then connect and create schema
+psql -h $RDS_ENDPOINT -U dbadmin -d medrobotics -f /tmp/01-create-tables.sql
 ```
+
+See [BASTION-QUICKSTART.md](BASTION-QUICKSTART.md) for multiple methods to upload SQL files.
 
 ### 3. Upload Sample Data to S3
 
@@ -230,9 +269,14 @@ aws s3 cp ../../phase1-data-model/data_generators/sample_data/surgical_robots.cs
   s3://$RAW_BUCKET/robots/surgical_robots.csv
 ```
 
-### 4. Load Data into RDS
+### 4. Load Data into RDS (from Bastion)
 
-Use the provided SQL script or create a custom data loader.
+```bash
+# From bastion host
+psql -h $RDS_ENDPOINT -U dbadmin -d medrobotics -f /tmp/02-load-sample-data.sql
+```
+
+Or use the provided SQL script and create a custom data loader.
 
 ## Verification
 
@@ -247,8 +291,14 @@ aws cloudformation list-stacks \
 
 ### Test Database Connection
 
+From bastion host:
+
 ```bash
-psql -h <RDS_ENDPOINT> -U dbadmin -d medrobotics -c "\dt"
+# Interactive connection using helper script
+./connect-to-rds.sh
+
+# Or manually
+psql -h $RDS_ENDPOINT -U dbadmin -d medrobotics -c "\dt"
 ```
 
 ### List S3 Buckets
@@ -318,10 +368,16 @@ aws cloudformation describe-stack-events \
 
 ### RDS Connection Issues
 
-- Check security group rules
-- Verify RDS is in private subnet
-- Use bastion host or VPN for access
+**Error: "could not translate host name to address"**
+- This is expected! RDS is in a private subnet
+- Deploy and use bastion host (see BASTION-QUICKSTART.md)
+- Never make RDS publicly accessible in production
+
+**Other issues:**
+- Check security group rules allow bastion -> RDS traffic
+- Verify bastion is in public subnet
 - Check database credentials in Secrets Manager
+- Verify VPC DNS is enabled
 
 ### S3 Access Denied
 

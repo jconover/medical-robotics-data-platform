@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - Bastion Host for Database Access'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  InstanceType:
+    Description: EC2 instance type for bastion host
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+
+  KeyPairName:
+    Description: (Optional) EC2 Key Pair for SSH access. Leave empty to use SSM Session Manager only.
+    Type: String
+    Default: ''
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+
+Resources:
+  # IAM Role for Bastion Host (allows SSM Session Manager access)
+  BastionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-bastion-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Instance Profile
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${EnvironmentName}-bastion-profile'
+      Roles:
+        - !Ref BastionRole
+
+  # Bastion Host EC2 Instance
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !Sub '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      SubnetId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-public-subnet-1'
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-bastion-sg-id'
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          # Update system
+          yum update -y
+
+          # Install PostgreSQL 17 client from official PostgreSQL repository
+          # Amazon Linux 2023 is based on Fedora, similar to RHEL 9
+          dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+
+          # Disable built-in PostgreSQL module to avoid conflicts
+          dnf -qy module disable postgresql
+
+          # Install PostgreSQL 17 client
+          dnf install -y postgresql17
+
+          # Verify installation
+          psql --version
+
+          # Install useful tools
+          yum install -y jq git tmux vim
+
+          # Install AWS CLI v2 (latest)
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip
+          ./aws/install
+          rm -rf aws awscliv2.zip
+
+          # Configure CloudWatch Logs
+          yum install -y amazon-cloudwatch-agent
+
+          # Create helper script for database connection
+          cat > /home/ec2-user/connect-to-rds.sh << 'EOFSCRIPT'
+          #!/bin/bash
+          # Get RDS endpoint from CloudFormation
+          RDS_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${EnvironmentName}-rds \
+            --region ${AWS::Region} \
+            --query 'Stacks[0].Outputs[?OutputKey==`DBEndpoint`].OutputValue' \
+            --output text)
+
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "Connecting to PostgreSQL..."
+          psql -h $RDS_ENDPOINT -U dbadmin -d medrobotics
+          EOFSCRIPT
+
+          chmod +x /home/ec2-user/connect-to-rds.sh
+          chown ec2-user:ec2-user /home/ec2-user/connect-to-rds.sh
+
+          # Create schema setup script
+          cat > /home/ec2-user/setup-schema.sh << 'EOFSCRIPT'
+          #!/bin/bash
+          # Get RDS endpoint from CloudFormation
+          RDS_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name ${EnvironmentName}-rds \
+            --region ${AWS::Region} \
+            --query 'Stacks[0].Outputs[?OutputKey==`DBEndpoint`].OutputValue' \
+            --output text)
+
+          echo "RDS Endpoint: $RDS_ENDPOINT"
+          echo "Setting up database schema..."
+
+          # Check if schema file is provided
+          if [ -z "$1" ]; then
+            echo "Usage: ./setup-schema.sh <path-to-sql-file>"
+            echo "Example: ./setup-schema.sh /tmp/01-create-tables.sql"
+            exit 1
+          fi
+
+          psql -h $RDS_ENDPOINT -U dbadmin -d medrobotics -f "$1"
+          EOFSCRIPT
+
+          chmod +x /home/ec2-user/setup-schema.sh
+          chown ec2-user:ec2-user /home/ec2-user/setup-schema.sh
+
+          # Signal completion
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource BastionInstance --region ${AWS::Region}
+
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: Environment
+          Value: !Ref EnvironmentName
+
+  # Elastic IP (optional but recommended for consistent access)
+  BastionEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref BastionInstance
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-bastion-eip'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+Outputs:
+  BastionInstanceId:
+    Description: Bastion Host Instance ID
+    Value: !Ref BastionInstance
+    Export:
+      Name: !Sub '${EnvironmentName}-bastion-instance-id'
+
+  BastionPublicIP:
+    Description: Bastion Host Public IP Address
+    Value: !GetAtt BastionInstance.PublicIp
+    Export:
+      Name: !Sub '${EnvironmentName}-bastion-public-ip'
+
+  BastionElasticIP:
+    Description: Bastion Host Elastic IP (persistent)
+    Value: !Ref BastionEIP
+    Export:
+      Name: !Sub '${EnvironmentName}-bastion-eip'
+
+  SSMConnectionCommand:
+    Description: Command to connect via AWS Systems Manager Session Manager
+    Value: !Sub 'aws ssm start-session --target ${BastionInstance} --region ${AWS::Region}'
+
+  SSHConnectionCommand:
+    Description: SSH connection command (if key pair is configured)
+    Value: !If
+      - HasKeyPair
+      - !Sub 'ssh -i ~/.ssh/${KeyPairName}.pem ec2-user@${BastionEIP}'
+      - 'Key pair not configured - use SSM Session Manager instead'
+
+  DatabaseConnectionHelp:
+    Description: How to connect to RDS from bastion
+    Value: 'After connecting to bastion, run: ./connect-to-rds.sh'
