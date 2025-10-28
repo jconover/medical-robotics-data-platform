@@ -118,6 +118,9 @@ aws ssm start-session \
 
 # In another terminal on your local machine
 psql -h localhost -p 5433 -U dbadmin -d medrobotics -f sql-schemas/01-create-tables.sql
+
+psql -h localhost -p 5433 -U dbadmin -d medrobotics -f sql-schemas/02-load-sample-data.sql
+
 ```
 
 ## Troubleshooting
