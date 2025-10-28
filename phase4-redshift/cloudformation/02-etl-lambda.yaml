@@ -1,0 +1,300 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - ETL Lambda Functions'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  LambdaCodeBucket:
+    Description: S3 bucket containing Lambda deployment packages
+    Type: String
+
+  RDSToRedshiftCodeKey:
+    Description: S3 key for RDS to Redshift ETL Lambda code
+    Type: String
+    Default: lambda/rds_to_redshift_etl.zip
+
+  TelemetryETLCodeKey:
+    Description: S3 key for Telemetry ETL Lambda code
+    Type: String
+    Default: lambda/s3_telemetry_to_redshift.zip
+
+Resources:
+  # Lambda Execution Role
+  ETLLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-etl-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole'
+      Policies:
+        - PolicyName: ETLLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${EnvironmentName}-*'
+              # Secrets Manager
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-rds-secret-arn'
+                  - !GetAtt RedshiftSecret.Id
+              # S3 Access
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub
+                    - 'arn:aws:s3:::${Bucket}/*'
+                    - Bucket:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+                  - !Sub
+                    - 'arn:aws:s3:::${Bucket}'
+                    - Bucket:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub
+                    - 'arn:aws:s3:::${Bucket}/*'
+                    - Bucket:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+                  - !Sub
+                    - 'arn:aws:s3:::${Bucket}'
+                    - Bucket:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+              # VPC ENI Management
+              - Effect: Allow
+                Action:
+                  - 'ec2:CreateNetworkInterface'
+                  - 'ec2:DescribeNetworkInterfaces'
+                  - 'ec2:DeleteNetworkInterface'
+                  - 'ec2:AssignPrivateIpAddresses'
+                  - 'ec2:UnassignPrivateIpAddresses'
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-etl-lambda-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Redshift Secret (for Lambda access)
+  RedshiftSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${EnvironmentName}-redshift-secret'
+      Description: Redshift master user credentials
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "dwadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"@/\\'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-secret'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Lambda Security Group
+  ETLLambdaSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-etl-lambda-sg'
+      GroupDescription: Security group for ETL Lambda functions
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-etl-lambda-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Allow Lambda to access RDS
+  RDSIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-rds-sg-id'
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ETLLambdaSG
+      Description: Allow Lambda ETL access to RDS
+
+  # Allow Lambda to access Redshift
+  RedshiftIngressFromLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-redshift-sg-id'
+      IpProtocol: tcp
+      FromPort: 5439
+      ToPort: 5439
+      SourceSecurityGroupId: !Ref ETLLambdaSG
+      Description: Allow Lambda ETL access to Redshift
+
+  # CloudWatch Log Groups
+  RDSETLLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EnvironmentName}-rds-to-redshift-etl'
+      RetentionInDays: 14
+
+  TelemetryETLLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EnvironmentName}-telemetry-etl'
+      RetentionInDays: 14
+
+  # Lambda Function: RDS to Redshift ETL
+  RDSToRedshiftETL:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-rds-to-redshift-etl'
+      Description: ETL from RDS to Redshift data warehouse
+      Runtime: python3.11
+      Handler: rds_to_redshift_etl.lambda_handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 1024
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref RDSToRedshiftCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ETLLambdaSG
+        SubnetIds:
+          - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-1'
+          - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-2'
+      Environment:
+        Variables:
+          RDS_HOST:
+            Fn::ImportValue: !Sub '${EnvironmentName}-rds-endpoint'
+          RDS_PORT: '5432'
+          RDS_DBNAME: medrobotics
+          RDS_USER: dbadmin
+          RDS_SECRET_ARN:
+            Fn::ImportValue: !Sub '${EnvironmentName}-rds-secret-arn'
+          REDSHIFT_HOST:
+            Fn::ImportValue: !Sub '${EnvironmentName}-redshift-endpoint'
+          REDSHIFT_PORT: '5439'
+          REDSHIFT_DBNAME: medrobotics_dw
+          REDSHIFT_USER: dwadmin
+          REDSHIFT_SECRET_ARN: !Ref RedshiftSecret
+          S3_STAGING_BUCKET:
+            Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+          REDSHIFT_IAM_ROLE:
+            Fn::ImportValue: !Sub '${EnvironmentName}-redshift-role-arn'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-rds-to-redshift-etl'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Lambda Function: Telemetry ETL
+  TelemetryETL:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${EnvironmentName}-telemetry-etl'
+      Description: ETL for telemetry data from S3 to Redshift
+      Runtime: python3.11
+      Handler: s3_telemetry_to_redshift.lambda_handler
+      Role: !GetAtt ETLLambdaRole.Arn
+      Timeout: 900  # 15 minutes
+      MemorySize: 2048
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Ref TelemetryETLCodeKey
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref ETLLambdaSG
+        SubnetIds:
+          - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-1'
+          - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-2'
+      Environment:
+        Variables:
+          REDSHIFT_HOST:
+            Fn::ImportValue: !Sub '${EnvironmentName}-redshift-endpoint'
+          REDSHIFT_PORT: '5439'
+          REDSHIFT_DBNAME: medrobotics_dw
+          REDSHIFT_USER: dwadmin
+          REDSHIFT_SECRET_ARN: !Ref RedshiftSecret
+          S3_RAW_BUCKET:
+            Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+          S3_STAGING_BUCKET:
+            Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+          REDSHIFT_IAM_ROLE:
+            Fn::ImportValue: !Sub '${EnvironmentName}-redshift-role-arn'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-telemetry-etl'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # EventBridge Rule for Daily ETL
+  DailyETLRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-daily-etl'
+      Description: Trigger daily ETL at 2 AM UTC
+      ScheduleExpression: 'cron(0 2 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt RDSToRedshiftETL.Arn
+          Id: RDSToRedshiftETLTarget
+          Input: '{"etl_type": "full"}'
+
+  # Permission for EventBridge to invoke Lambda
+  DailyETLPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref RDSToRedshiftETL
+      Action: 'lambda:InvokeFunction'
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyETLRule.Arn
+
+Outputs:
+  RDSToRedshiftETLArn:
+    Description: ARN of RDS to Redshift ETL Lambda
+    Value: !GetAtt RDSToRedshiftETL.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-rds-etl-lambda-arn'
+
+  TelemetryETLArn:
+    Description: ARN of Telemetry ETL Lambda
+    Value: !GetAtt TelemetryETL.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-telemetry-etl-lambda-arn'
+
+  RedshiftSecretArn:
+    Description: ARN of Redshift credentials secret
+    Value: !Ref RedshiftSecret
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-secret-arn'
+
+  ETLLambdaSGId:
+    Description: Security Group ID for ETL Lambda functions
+    Value: !Ref ETLLambdaSG
+    Export:
+      Name: !Sub '${EnvironmentName}-etl-lambda-sg-id'

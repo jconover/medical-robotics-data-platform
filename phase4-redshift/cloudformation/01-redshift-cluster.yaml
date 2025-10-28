@@ -1,0 +1,271 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - Redshift Cluster'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  NodeType:
+    Description: Redshift node type
+    Type: String
+    Default: dc2.large
+    AllowedValues:
+      - dc2.large
+      - dc2.8xlarge
+      - ra3.xlplus
+      - ra3.4xlarge
+      - ra3.16xlplus
+
+  NumberOfNodes:
+    Description: Number of compute nodes in the cluster
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 32
+
+  DatabaseName:
+    Description: Name of the Redshift database
+    Type: String
+    Default: medrobotics_dw
+    AllowedPattern: '[a-z][a-z0-9_]*'
+
+  MasterUsername:
+    Description: Master username for Redshift cluster
+    Type: String
+    Default: dwadmin
+    AllowedPattern: '[a-z][a-z0-9_]*'
+
+  MasterUserPassword:
+    Description: Master password for Redshift cluster (8-64 chars)
+    Type: String
+    NoEcho: true
+    MinLength: 8
+    MaxLength: 64
+    AllowedPattern: '^[a-zA-Z0-9]*$'
+
+  MaintenanceWindow:
+    Description: Maintenance window (ddd:hh24:mi-ddd:hh24:mi)
+    Type: String
+    Default: 'sun:03:00-sun:04:00'
+
+Resources:
+  # Redshift Subnet Group
+  RedshiftSubnetGroup:
+    Type: AWS::Redshift::ClusterSubnetGroup
+    Properties:
+      Description: Subnet group for Redshift cluster
+      SubnetIds:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-data-subnet-1'
+        - Fn::ImportValue: !Sub '${EnvironmentName}-data-subnet-2'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-subnet-group'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Redshift Parameter Group
+  RedshiftParameterGroup:
+    Type: AWS::Redshift::ClusterParameterGroup
+    Properties:
+      Description: Parameter group for medical robotics data warehouse
+      ParameterGroupFamily: redshift-1.0
+      Parameters:
+        - ParameterName: enable_user_activity_logging
+          ParameterValue: 'true'
+        - ParameterName: require_ssl
+          ParameterValue: 'true'
+        - ParameterName: max_concurrency_scaling_clusters
+          ParameterValue: '1'
+        - ParameterName: auto_analyze
+          ParameterValue: 'true'
+        - ParameterName: statement_timeout
+          ParameterValue: '43200000'  # 12 hours in milliseconds
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-params'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Redshift Cluster
+  RedshiftCluster:
+    Type: AWS::Redshift::Cluster
+    Properties:
+      ClusterIdentifier: !Sub '${EnvironmentName}-redshift'
+      ClusterType: !If
+        - IsSingleNode
+        - single-node
+        - multi-node
+      NodeType: !Ref NodeType
+      NumberOfNodes: !If
+        - IsSingleNode
+        - !Ref AWS::NoValue
+        - !Ref NumberOfNodes
+      DBName: !Ref DatabaseName
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword: !Ref MasterUserPassword
+      ClusterSubnetGroupName: !Ref RedshiftSubnetGroup
+      VpcSecurityGroupIds:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-redshift-sg-id'
+      ClusterParameterGroupName: !Ref RedshiftParameterGroup
+      IamRoles:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-redshift-role-arn'
+      # Security settings
+      Encrypted: true
+      KmsKeyId: !Ref RedshiftKMSKey
+      PubliclyAccessible: false
+      # Backup settings
+      AutomatedSnapshotRetentionPeriod: 7
+      PreferredMaintenanceWindow: !Ref MaintenanceWindow
+      # Monitoring
+      EnhancedVpcRouting: true
+      LoggingProperties:
+        BucketName:
+          Fn::ImportValue: !Sub '${EnvironmentName}-logs-bucket'
+        S3KeyPrefix: 'redshift/'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-cluster'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # KMS Key for Redshift Encryption
+  RedshiftKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for Redshift cluster encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Redshift to use the key
+            Effect: Allow
+            Principal:
+              Service: redshift.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:CreateGrant'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-redshift-kms'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  RedshiftKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-redshift'
+      TargetKeyId: !Ref RedshiftKMSKey
+
+  # CloudWatch Alarms
+  RedshiftCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-redshift-high-cpu'
+      AlarmDescription: Alert when Redshift CPU exceeds 80%
+      MetricName: CPUUtilization
+      Namespace: AWS/Redshift
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterIdentifier
+          Value: !Ref RedshiftCluster
+      TreatMissingData: notBreaching
+
+  RedshiftDiskSpaceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-redshift-low-disk'
+      AlarmDescription: Alert when Redshift disk space falls below 20%
+      MetricName: PercentageDiskSpaceUsed
+      Namespace: AWS/Redshift
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterIdentifier
+          Value: !Ref RedshiftCluster
+      TreatMissingData: notBreaching
+
+  RedshiftHealthStatusAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-redshift-unhealthy'
+      AlarmDescription: Alert when Redshift cluster is unhealthy
+      MetricName: HealthStatus
+      Namespace: AWS/Redshift
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterIdentifier
+          Value: !Ref RedshiftCluster
+      TreatMissingData: breaching
+
+Conditions:
+  IsSingleNode: !Equals [!Ref NumberOfNodes, 1]
+
+Outputs:
+  ClusterIdentifier:
+    Description: Redshift Cluster Identifier
+    Value: !Ref RedshiftCluster
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-cluster-id'
+
+  ClusterEndpoint:
+    Description: Redshift Cluster Endpoint
+    Value: !GetAtt RedshiftCluster.Endpoint.Address
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-endpoint'
+
+  ClusterPort:
+    Description: Redshift Cluster Port
+    Value: !GetAtt RedshiftCluster.Endpoint.Port
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-port'
+
+  DatabaseName:
+    Description: Redshift Database Name
+    Value: !Ref DatabaseName
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-database'
+
+  ClusterSecurityGroup:
+    Description: Security Group ID for Redshift Cluster
+    Value:
+      Fn::ImportValue: !Sub '${EnvironmentName}-redshift-sg-id'
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-sg'
+
+  RedshiftIAMRole:
+    Description: IAM Role ARN for Redshift cluster
+    Value:
+      Fn::ImportValue: !Sub '${EnvironmentName}-redshift-role-arn'
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-iam-role'
+
+  KMSKeyId:
+    Description: KMS Key ID for Redshift encryption
+    Value: !Ref RedshiftKMSKey
+    Export:
+      Name: !Sub '${EnvironmentName}-redshift-kms-key-id'
+
+  ConnectionString:
+    Description: JDBC connection string for Redshift
+    Value: !Sub 'jdbc:redshift://${RedshiftCluster.Endpoint.Address}:${RedshiftCluster.Endpoint.Port}/${DatabaseName}'

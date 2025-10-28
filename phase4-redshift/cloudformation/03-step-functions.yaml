@@ -1,0 +1,378 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - Step Functions ETL Orchestration'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+Resources:
+  # Step Functions Execution Role
+  StepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-step-functions-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: StepFunctionsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Lambda Invoke
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-rds-etl-lambda-arn'
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-telemetry-etl-lambda-arn'
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogDelivery'
+                  - 'logs:GetLogDelivery'
+                  - 'logs:UpdateLogDelivery'
+                  - 'logs:DeleteLogDelivery'
+                  - 'logs:ListLogDeliveries'
+                  - 'logs:PutResourcePolicy'
+                  - 'logs:DescribeResourcePolicies'
+                  - 'logs:DescribeLogGroups'
+                Resource: '*'
+              # X-Ray
+              - Effect: Allow
+                Action:
+                  - 'xray:PutTraceSegments'
+                  - 'xray:PutTelemetryRecords'
+                  - 'xray:GetSamplingRules'
+                  - 'xray:GetSamplingTargets'
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-step-functions-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # CloudWatch Log Group for Step Functions
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/vendedlogs/states/${EnvironmentName}-etl-orchestration'
+      RetentionInDays: 30
+
+  # Step Functions State Machine
+  ETLOrchestrationStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub '${EnvironmentName}-etl-orchestration'
+      StateMachineType: STANDARD
+      RoleArn: !GetAtt StepFunctionsRole.Arn
+      LoggingConfiguration:
+        Level: ALL
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+      TracingConfiguration:
+        Enabled: true
+      DefinitionString: !Sub
+        - |
+          {
+            "Comment": "Medical Robotics ETL Orchestration - Full daily pipeline",
+            "StartAt": "Load Dimensions",
+            "States": {
+              "Load Dimensions": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${RDSETLLambda}",
+                  "Payload": {
+                    "etl_type": "dimensions"
+                  }
+                },
+                "ResultPath": "$.dimensions_result",
+                "Next": "Check Dimension Load",
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "Lambda.ServiceException",
+                      "Lambda.AWSLambdaException",
+                      "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.error",
+                    "Next": "ETL Failed"
+                  }
+                ]
+              },
+              "Check Dimension Load": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.dimensions_result.Payload.status",
+                    "StringEquals": "success",
+                    "Next": "Load Procedures"
+                  }
+                ],
+                "Default": "ETL Failed"
+              },
+              "Load Procedures": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${RDSETLLambda}",
+                  "Payload": {
+                    "etl_type": "procedures",
+                    "start_date.$": "$.start_date",
+                    "end_date.$": "$.end_date"
+                  }
+                },
+                "ResultPath": "$.procedures_result",
+                "Next": "Check Procedure Load",
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "Lambda.ServiceException",
+                      "Lambda.AWSLambdaException",
+                      "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.error",
+                    "Next": "ETL Failed"
+                  }
+                ]
+              },
+              "Check Procedure Load": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.procedures_result.Payload.status",
+                    "StringEquals": "success",
+                    "Next": "Load Telemetry"
+                  }
+                ],
+                "Default": "ETL Failed"
+              },
+              "Load Telemetry": {
+                "Type": "Task",
+                "Resource": "arn:aws:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${TelemetryETLLambda}",
+                  "Payload": {
+                    "batch_date.$": "$.batch_date",
+                    "s3_prefix": "telemetry/"
+                  }
+                },
+                "ResultPath": "$.telemetry_result",
+                "Next": "Check Telemetry Load",
+                "Retry": [
+                  {
+                    "ErrorEquals": [
+                      "Lambda.ServiceException",
+                      "Lambda.AWSLambdaException",
+                      "Lambda.SdkClientException"
+                    ],
+                    "IntervalSeconds": 2,
+                    "MaxAttempts": 3,
+                    "BackoffRate": 2
+                  }
+                ],
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "ResultPath": "$.error",
+                    "Next": "Partial Success"
+                  }
+                ]
+              },
+              "Check Telemetry Load": {
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.telemetry_result.Payload.status",
+                    "StringEquals": "success",
+                    "Next": "ETL Succeeded"
+                  }
+                ],
+                "Default": "Partial Success"
+              },
+              "ETL Succeeded": {
+                "Type": "Pass",
+                "Parameters": {
+                  "status": "SUCCESS",
+                  "message": "All ETL stages completed successfully",
+                  "dimensions.$": "$.dimensions_result.Payload.records_loaded",
+                  "procedures.$": "$.procedures_result.Payload.records_loaded",
+                  "telemetry.$": "$.telemetry_result.Payload.records_loaded"
+                },
+                "End": true
+              },
+              "Partial Success": {
+                "Type": "Pass",
+                "Parameters": {
+                  "status": "PARTIAL_SUCCESS",
+                  "message": "Some ETL stages failed",
+                  "dimensions.$": "$.dimensions_result.Payload.records_loaded",
+                  "procedures.$": "$.procedures_result.Payload.records_loaded",
+                  "error.$": "$.error"
+                },
+                "End": true
+              },
+              "ETL Failed": {
+                "Type": "Fail",
+                "Error": "ETLFailure",
+                "Cause": "One or more ETL stages failed"
+              }
+            }
+          }
+        - RDSETLLambda:
+            Fn::ImportValue: !Sub '${EnvironmentName}-rds-etl-lambda-arn'
+          TelemetryETLLambda:
+            Fn::ImportValue: !Sub '${EnvironmentName}-telemetry-etl-lambda-arn'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-etl-orchestration'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # EventBridge Rule to trigger Step Functions daily
+  DailyETLSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${EnvironmentName}-daily-etl-schedule'
+      Description: Trigger ETL orchestration daily at 3 AM UTC
+      ScheduleExpression: 'cron(0 3 * * ? *)'
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ETLOrchestrationStateMachine.Arn
+          Id: ETLStateMachineTarget
+          RoleArn: !GetAtt EventBridgeStepFunctionsRole.Arn
+          Input: !Sub |
+            {
+              "batch_date": "{{now | format 'yyyyMMdd'}}",
+              "start_date": "{{now | format 'yyyy-MM-dd'}}",
+              "end_date": "{{now | format 'yyyy-MM-dd'}}"
+            }
+
+  # IAM Role for EventBridge to invoke Step Functions
+  EventBridgeStepFunctionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-eventbridge-sfn-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: StartStateMachinePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'states:StartExecution'
+                Resource: !GetAtt ETLOrchestrationStateMachine.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eventbridge-sfn-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # SNS Topic for ETL Notifications
+  ETLNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub '${EnvironmentName}-etl-notifications'
+      DisplayName: Medical Robotics ETL Notifications
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-etl-notifications'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # CloudWatch Alarm for Failed Executions
+  ETLFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-etl-failures'
+      AlarmDescription: Alert when ETL state machine fails
+      MetricName: ExecutionsFailed
+      Namespace: AWS/States
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref ETLOrchestrationStateMachine
+      AlarmActions:
+        - !Ref ETLNotificationTopic
+      TreatMissingData: notBreaching
+
+  # CloudWatch Alarm for Long Running Executions
+  ETLDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-etl-long-running'
+      AlarmDescription: Alert when ETL takes longer than expected
+      MetricName: ExecutionTime
+      Namespace: AWS/States
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1800000  # 30 minutes in milliseconds
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref ETLOrchestrationStateMachine
+      AlarmActions:
+        - !Ref ETLNotificationTopic
+      TreatMissingData: notBreaching
+
+Outputs:
+  StateMachineArn:
+    Description: ARN of the ETL orchestration state machine
+    Value: !Ref ETLOrchestrationStateMachine
+    Export:
+      Name: !Sub '${EnvironmentName}-etl-state-machine-arn'
+
+  StateMachineName:
+    Description: Name of the ETL orchestration state machine
+    Value: !GetAtt ETLOrchestrationStateMachine.Name
+    Export:
+      Name: !Sub '${EnvironmentName}-etl-state-machine-name'
+
+  ETLNotificationTopicArn:
+    Description: ARN of SNS topic for ETL notifications
+    Value: !Ref ETLNotificationTopic
+    Export:
+      Name: !Sub '${EnvironmentName}-etl-notification-topic-arn'
+
+  StateMachineLogGroup:
+    Description: CloudWatch Log Group for Step Functions
+    Value: !Ref StateMachineLogGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-etl-sfn-log-group'
