@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - ECS Services'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  DataIngestionDesiredCount:
+    Description: Desired number of data ingestion tasks
+    Type: Number
+    Default: 1
+    MinValue: 0
+    MaxValue: 10
+
+  APIServiceDesiredCount:
+    Description: Desired number of API service tasks
+    Type: Number
+    Default: 2
+    MinValue: 0
+    MaxValue: 10
+
+Resources:
+  # Data Ingestion Service
+  DataIngestionService:
+    Type: AWS::ECS::Service
+    DependsOn: DataIngestionListenerRule
+    Properties:
+      ServiceName: !Sub '${EnvironmentName}-data-ingestion'
+      Cluster:
+        Fn::ImportValue: !Sub '${EnvironmentName}-ecs-cluster-name'
+      TaskDefinition:
+        Fn::ImportValue: !Sub '${EnvironmentName}-data-ingestion-task-arn'
+      DesiredCount: !Ref DataIngestionDesiredCount
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub '${EnvironmentName}-ecs-sg-id'
+          Subnets:
+            - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-1'
+            - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-2'
+      LoadBalancers:
+        - ContainerName: data-ingestion
+          ContainerPort: 8080
+          TargetGroupArn:
+            Fn::ImportValue: !Sub '${EnvironmentName}-ingestion-target-group-arn'
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-data-ingestion-service'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # API Service
+  APIService:
+    Type: AWS::ECS::Service
+    DependsOn: APIListenerRule
+    Properties:
+      ServiceName: !Sub '${EnvironmentName}-api-service'
+      Cluster:
+        Fn::ImportValue: !Sub '${EnvironmentName}-ecs-cluster-name'
+      TaskDefinition:
+        Fn::ImportValue: !Sub '${EnvironmentName}-api-service-task-arn'
+      DesiredCount: !Ref APIServiceDesiredCount
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - Fn::ImportValue: !Sub '${EnvironmentName}-ecs-sg-id'
+          Subnets:
+            - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-1'
+            - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-2'
+      LoadBalancers:
+        - ContainerName: api-service
+          ContainerPort: 5000
+          TargetGroupArn:
+            Fn::ImportValue: !Sub '${EnvironmentName}-api-target-group-arn'
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-api-service'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Auto Scaling for Data Ingestion
+  DataIngestionScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ResourceId: !Sub
+        - 'service/${ClusterName}/${ServiceName}'
+        - ClusterName:
+            Fn::ImportValue: !Sub '${EnvironmentName}-ecs-cluster-name'
+          ServiceName: !GetAtt DataIngestionService.Name
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: 1
+      MaxCapacity: 5
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+
+  DataIngestionScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-data-ingestion-scaling'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref DataIngestionScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+  # Auto Scaling for API Service
+  APIServiceScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      ServiceNamespace: ecs
+      ResourceId: !Sub
+        - 'service/${ClusterName}/${ServiceName}'
+        - ClusterName:
+            Fn::ImportValue: !Sub '${EnvironmentName}-ecs-cluster-name'
+          ServiceName: !GetAtt APIService.Name
+      ScalableDimension: ecs:service:DesiredCount
+      MinCapacity: 1
+      MaxCapacity: 10
+      RoleARN: !Sub 'arn:aws:iam::${AWS::AccountId}:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
+
+  APIServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: !Sub '${EnvironmentName}-api-service-scaling'
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref APIServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: 70
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+
+  # Reference to ALB listener rules (to ensure ordering)
+  DataIngestionListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Fn::ImportValue: !Sub '${EnvironmentName}-alb-listener-arn'
+      Priority: 20
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /ingest/*
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Fn::ImportValue: !Sub '${EnvironmentName}-ingestion-target-group-arn'
+
+  APIListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn:
+        Fn::ImportValue: !Sub '${EnvironmentName}-alb-listener-arn'
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /api/*
+      Actions:
+        - Type: forward
+          TargetGroupArn:
+            Fn::ImportValue: !Sub '${EnvironmentName}-api-target-group-arn'
+
+Outputs:
+  DataIngestionServiceName:
+    Description: Name of the Data Ingestion ECS Service
+    Value: !GetAtt DataIngestionService.Name
+    Export:
+      Name: !Sub '${EnvironmentName}-data-ingestion-service-name'
+
+  APIServiceName:
+    Description: Name of the API ECS Service
+    Value: !GetAtt APIService.Name
+    Export:
+      Name: !Sub '${EnvironmentName}-api-service-name'

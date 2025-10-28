@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - ECS Cluster and CloudWatch Logs'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+Resources:
+  # ECS Cluster
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub '${EnvironmentName}-cluster'
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+          Base: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 4
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-ecs-cluster'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # CloudWatch Log Groups
+  DataIngestionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ecs/${EnvironmentName}/data-ingestion'
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-data-ingestion-logs'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  APIServiceLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/ecs/${EnvironmentName}/api-service'
+      RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-api-service-logs'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # CloudWatch Dashboard
+  ECSMonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub '${EnvironmentName}-ecs-monitoring'
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ECS", "CPUUtilization", {"stat": "Average"}],
+                  [".", "MemoryUtilization", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "ECS Cluster Resources",
+                "yAxis": {
+                  "left": {
+                    "min": 0,
+                    "max": 100
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "metrics": [
+                  ["AWS/ECS", "TaskCount", {"stat": "Average"}]
+                ],
+                "period": 300,
+                "stat": "Average",
+                "region": "${AWS::Region}",
+                "title": "Running Tasks"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ECSClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub '${EnvironmentName}-ecs-cluster-name'
+
+  ECSClusterArn:
+    Description: ECS Cluster ARN
+    Value: !GetAtt ECSCluster.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-ecs-cluster-arn'
+
+  DataIngestionLogGroup:
+    Description: CloudWatch Log Group for Data Ingestion Service
+    Value: !Ref DataIngestionLogGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-data-ingestion-log-group'
+
+  APIServiceLogGroup:
+    Description: CloudWatch Log Group for API Service
+    Value: !Ref APIServiceLogGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-api-service-log-group'

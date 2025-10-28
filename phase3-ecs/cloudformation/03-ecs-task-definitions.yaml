@@ -1,0 +1,170 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - ECS Task Definitions'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  DataIngestionImage:
+    Description: Docker image for data ingestion service
+    Type: String
+    Default: ''
+
+  APIServiceImage:
+    Description: Docker image for API service
+    Type: String
+    Default: ''
+
+  RDSPassword:
+    Description: RDS database password
+    Type: String
+    NoEcho: true
+
+Resources:
+  # Data Ingestion Task Definition
+  DataIngestionTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-data-ingestion'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn:
+        Fn::ImportValue: !Sub '${EnvironmentName}-ecs-task-execution-role-arn'
+      TaskRoleArn:
+        Fn::ImportValue: !Sub '${EnvironmentName}-ecs-task-role-arn'
+      ContainerDefinitions:
+        - Name: data-ingestion
+          Image: !If
+            - HasDataIngestionImage
+            - !Ref DataIngestionImage
+            - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-data-ingestion:latest'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 8080
+              Protocol: tcp
+          Environment:
+            - Name: S3_RAW_BUCKET
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket'
+            - Name: RDS_HOST
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-rds-endpoint'
+            - Name: RDS_PORT
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-rds-port'
+            - Name: RDS_DBNAME
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-rds-dbname'
+            - Name: RDS_USER
+              Value: dbadmin
+            - Name: RDS_PASSWORD
+              Value: !Ref RDSPassword
+            - Name: PORT
+              Value: '8080'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:
+                Fn::ImportValue: !Sub '${EnvironmentName}-data-ingestion-log-group'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - python -c "import requests; requests.get('http://localhost:8080/health').raise_for_status()" || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-data-ingestion-task'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # API Service Task Definition
+  APIServiceTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub '${EnvironmentName}-api-service'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: '512'
+      Memory: '1024'
+      ExecutionRoleArn:
+        Fn::ImportValue: !Sub '${EnvironmentName}-ecs-task-execution-role-arn'
+      TaskRoleArn:
+        Fn::ImportValue: !Sub '${EnvironmentName}-ecs-task-role-arn'
+      ContainerDefinitions:
+        - Name: api-service
+          Image: !If
+            - HasAPIServiceImage
+            - !Ref APIServiceImage
+            - !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${EnvironmentName}-api-service:latest'
+          Essential: true
+          PortMappings:
+            - ContainerPort: 5000
+              Protocol: tcp
+          Environment:
+            - Name: S3_RAW_BUCKET
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket'
+            - Name: RDS_HOST
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-rds-endpoint'
+            - Name: RDS_PORT
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-rds-port'
+            - Name: RDS_DBNAME
+              Value:
+                Fn::ImportValue: !Sub '${EnvironmentName}-rds-dbname'
+            - Name: RDS_USER
+              Value: dbadmin
+            - Name: RDS_PASSWORD
+              Value: !Ref RDSPassword
+            - Name: PORT
+              Value: '5000'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:
+                Fn::ImportValue: !Sub '${EnvironmentName}-api-service-log-group'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - python -c "import requests; requests.get('http://localhost:5000/health').raise_for_status()" || exit 1
+            Interval: 30
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 60
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-api-service-task'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+Conditions:
+  HasDataIngestionImage: !Not [!Equals [!Ref DataIngestionImage, '']]
+  HasAPIServiceImage: !Not [!Equals [!Ref APIServiceImage, '']]
+
+Outputs:
+  DataIngestionTaskDefinitionArn:
+    Description: ARN of Data Ingestion Task Definition
+    Value: !Ref DataIngestionTaskDefinition
+    Export:
+      Name: !Sub '${EnvironmentName}-data-ingestion-task-arn'
+
+  APIServiceTaskDefinitionArn:
+    Description: ARN of API Service Task Definition
+    Value: !Ref APIServiceTaskDefinition
+    Export:
+      Name: !Sub '${EnvironmentName}-api-service-task-arn'
