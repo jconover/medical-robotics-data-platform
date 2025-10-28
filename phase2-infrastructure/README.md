@@ -72,7 +72,7 @@ This phase establishes the core AWS infrastructure for the Medical Robotics Data
 - **CloudWatch Events Role**: For scheduled tasks
 
 ### 5. RDS PostgreSQL (`05-rds-postgres.yaml`)
-- **Engine**: PostgreSQL 15.5
+- **Engine**: PostgreSQL 17.4
 - **Instance Class**: Configurable (default: db.t3.micro)
 - **Storage**: GP3 SSD with encryption
 - **Multi-AZ**: Optional for production
