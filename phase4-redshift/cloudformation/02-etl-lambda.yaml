@@ -203,7 +203,7 @@ Resources:
           REDSHIFT_USER: dwadmin
           REDSHIFT_SECRET_ARN: !Ref RedshiftSecret
           S3_STAGING_BUCKET:
-            Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+            Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket'
           REDSHIFT_IAM_ROLE:
             Fn::ImportValue: !Sub '${EnvironmentName}-redshift-role-arn'
       Tags:
@@ -241,9 +241,9 @@ Resources:
           REDSHIFT_USER: dwadmin
           REDSHIFT_SECRET_ARN: !Ref RedshiftSecret
           S3_RAW_BUCKET:
-            Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+            Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket'
           S3_STAGING_BUCKET:
-            Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+            Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket'
           REDSHIFT_IAM_ROLE:
             Fn::ImportValue: !Sub '${EnvironmentName}-redshift-role-arn'
       Tags:
