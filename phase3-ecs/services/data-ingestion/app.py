@@ -67,7 +67,8 @@ def ingest_telemetry():
             Bucket=S3_RAW_BUCKET,
             Key=s3_key,
             Body=json.dumps(data),
-            ContentType='application/json'
+            ContentType='application/json',
+            ServerSideEncryption='AES256'
         )
 
         return jsonify({
@@ -149,7 +150,8 @@ def ingest_batch():
             Bucket=S3_RAW_BUCKET,
             Key=s3_key,
             Body=json.dumps(records),
-            ContentType='application/json'
+            ContentType='application/json',
+            ServerSideEncryption='AES256'
         )
 
         return jsonify({

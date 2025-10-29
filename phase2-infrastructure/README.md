@@ -117,10 +117,11 @@ Use the provided deployment script:
 cd phase2-infrastructure/scripts
 
 # Set environment variables
+# Password Min 8 characters
 export ENVIRONMENT_NAME="medrobotics"
 export AWS_REGION="us-east-1"
 export DB_USERNAME="dbadmin"
-export DB_PASSWORD="YourSecurePassword123!"  # Min 8 characters
+export DB_PASSWORD="YourSecurePassword123"
 export DB_INSTANCE_CLASS="db.t3.micro"
 
 # Deploy all stacks

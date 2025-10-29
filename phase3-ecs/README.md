@@ -108,7 +108,7 @@ This creates ECR repositories and pushes:
 ### Step 2: Deploy ECS Infrastructure
 
 ```bash
-export RDS_PASSWORD="YourSecurePassword123!"
+export RDS_PASSWORD="YourSecurePassword123"
 
 # Deploy ECS cluster, ALB, and services
 ./deploy-ecs.sh
