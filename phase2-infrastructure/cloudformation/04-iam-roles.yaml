@@ -175,6 +175,16 @@ Resources:
                     - '${BucketArn}/*'
                     - BucketArn:
                         Fn::ImportValue: !Sub '${EnvironmentName}-analytics-bucket-arn'
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:PutObject
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-logs-bucket-arn'
+                  - !Sub
+                    - '${BucketArn}/*'
+                    - BucketArn:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-logs-bucket-arn'
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-redshift-role'

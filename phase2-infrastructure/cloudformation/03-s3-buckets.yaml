@@ -238,24 +238,6 @@ Resources:
       Bucket: !Ref LogsBucket
       PolicyDocument:
         Statement:
-          - Sid: DenyUnencryptedObjectUploads
-            Effect: Deny
-            Principal: '*'
-            Action: s3:PutObject
-            Resource: !Sub '${LogsBucket.Arn}/*'
-            Condition:
-              StringNotEquals:
-                s3:x-amz-server-side-encryption: AES256
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: '*'
-            Action: s3:*
-            Resource:
-              - !GetAtt LogsBucket.Arn
-              - !Sub '${LogsBucket.Arn}/*'
-            Condition:
-              Bool:
-                aws:SecureTransport: false
           - Sid: AllowRedshiftLogging
             Effect: Allow
             Principal:
@@ -266,6 +248,16 @@ Resources:
             Resource:
               - !GetAtt LogsBucket.Arn
               - !Sub '${LogsBucket.Arn}/*'
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - !GetAtt LogsBucket.Arn
+              - !Sub '${LogsBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
 
 Outputs:
   RawDataBucket:

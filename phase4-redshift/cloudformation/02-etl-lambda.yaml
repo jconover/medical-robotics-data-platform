@@ -65,11 +65,11 @@ Resources:
                   - !Sub
                     - 'arn:aws:s3:::${Bucket}/*'
                     - Bucket:
-                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket'
                   - !Sub
                     - 'arn:aws:s3:::${Bucket}'
                     - Bucket:
-                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-data-bucket'
               - Effect: Allow
                 Action:
                   - 's3:PutObject'
@@ -79,11 +79,11 @@ Resources:
                   - !Sub
                     - 'arn:aws:s3:::${Bucket}/*'
                     - Bucket:
-                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket'
                   - !Sub
                     - 'arn:aws:s3:::${Bucket}'
                     - Bucket:
-                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-bucket'
+                        Fn::ImportValue: !Sub '${EnvironmentName}-processed-data-bucket'
               # VPC ENI Management
               - Effect: Allow
                 Action:

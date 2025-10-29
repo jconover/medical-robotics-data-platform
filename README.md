@@ -210,8 +210,7 @@ This project is for educational and portfolio demonstration purposes.
 
 ## Contact
 
-**Justin** - Portfolio Project
-GitHub: [Your GitHub Profile]
+**Justin** - Portfolio Project: justinconover.io
 
 ---
 
