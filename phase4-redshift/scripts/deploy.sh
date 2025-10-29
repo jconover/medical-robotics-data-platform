@@ -119,6 +119,15 @@ upload_lambda_code() {
 deploy_redshift() {
     header "Step 1/3: Deploying Redshift Cluster"
 
+    # Check if stack already exists
+    if aws cloudformation describe-stacks \
+        --stack-name ${ENVIRONMENT_NAME}-redshift \
+        --region $AWS_REGION &> /dev/null; then
+        info "Redshift cluster stack already exists, skipping creation"
+        echo ""
+        return 0
+    fi
+
     # Prompt for Redshift password
     echo -n "Enter Redshift master password (8-64 chars, alphanumeric only): "
     read -s REDSHIFT_PASSWORD
@@ -154,6 +163,15 @@ deploy_redshift() {
 deploy_lambda() {
     header "Step 2/3: Deploying ETL Lambda Functions"
 
+    # Check if stack already exists
+    if aws cloudformation describe-stacks \
+        --stack-name ${ENVIRONMENT_NAME}-etl-lambda \
+        --region $AWS_REGION &> /dev/null; then
+        info "ETL Lambda stack already exists, skipping creation"
+        echo ""
+        return 0
+    fi
+
     info "Creating Lambda functions stack..."
     aws cloudformation create-stack \
         --stack-name ${ENVIRONMENT_NAME}-etl-lambda \
@@ -176,6 +194,15 @@ deploy_lambda() {
 # Deploy Step Functions
 deploy_step_functions() {
     header "Step 3/3: Deploying Step Functions Workflow"
+
+    # Check if stack already exists
+    if aws cloudformation describe-stacks \
+        --stack-name ${ENVIRONMENT_NAME}-step-functions \
+        --region $AWS_REGION &> /dev/null; then
+        info "Step Functions stack already exists, skipping creation"
+        echo ""
+        return 0
+    fi
 
     info "Creating Step Functions stack..."
     aws cloudformation create-stack \
