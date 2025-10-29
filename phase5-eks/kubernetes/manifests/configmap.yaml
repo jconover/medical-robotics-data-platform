@@ -1,0 +1,15 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: medrobotics
+  labels:
+    app: medrobotics
+data:
+  RDS_PORT: "5432"
+  RDS_DBNAME: "medrobotics"
+  RDS_USER: "dbadmin"
+  # S3 bucket names will be populated by deployment script
+  # S3_RAW_BUCKET: ""
+  # RDS_HOST: ""

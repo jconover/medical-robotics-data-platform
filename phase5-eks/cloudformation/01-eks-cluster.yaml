@@ -1,0 +1,447 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Medical Robotics Data Platform - EKS Cluster'
+
+Parameters:
+  EnvironmentName:
+    Description: Environment name prefix for resources
+    Type: String
+    Default: medrobotics
+    AllowedPattern: '[a-z0-9-]+'
+
+  KubernetesVersion:
+    Description: Kubernetes version
+    Type: String
+    Default: '1.28'
+    AllowedValues:
+      - '1.28'
+      - '1.29'
+      - '1.30'
+
+  NodeInstanceType:
+    Description: EC2 instance type for worker nodes
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+      - m5.xlarge
+
+  NodeGroupMinSize:
+    Description: Minimum number of worker nodes
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+
+  NodeGroupMaxSize:
+    Description: Maximum number of worker nodes
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 20
+
+  NodeGroupDesiredSize:
+    Description: Desired number of worker nodes
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 20
+
+Resources:
+  # EKS Cluster IAM Role
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-eks-cluster-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonEKSClusterPolicy'
+        - 'arn:aws:iam::aws:policy/AmazonEKSVPCResourceController'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-cluster-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # EKS Cluster Security Group
+  EKSClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-eks-cluster-sg'
+      GroupDescription: Security group for EKS cluster control plane
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-cluster-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # EKS Cluster
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Sub '${EnvironmentName}-cluster'
+      Version: !Ref KubernetesVersion
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref EKSClusterSecurityGroup
+        SubnetIds:
+          - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-1'
+          - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-2'
+          - Fn::ImportValue: !Sub '${EnvironmentName}-public-subnet-1'
+          - Fn::ImportValue: !Sub '${EnvironmentName}-public-subnet-2'
+        EndpointPrivateAccess: true
+        EndpointPublicAccess: true
+        PublicAccessCidrs:
+          - 0.0.0.0/0
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator
+            - Type: controllerManager
+            - Type: scheduler
+      EncryptionConfig:
+        - Provider:
+            KeyArn: !GetAtt EKSKMSKey.Arn
+          Resources:
+            - secrets
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-cluster'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # KMS Key for EKS Secrets Encryption
+  EKSKMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for EKS secrets encryption
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow EKS to use the key
+            Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:DescribeKey'
+              - 'kms:CreateGrant'
+            Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-kms'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  EKSKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${EnvironmentName}-eks'
+      TargetKeyId: !Ref EKSKMSKey
+
+  # Node Group IAM Role
+  NodeGroupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-eks-nodegroup-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy'
+        - 'arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy'
+        - 'arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly'
+        - 'arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: EKSNodeAdditionalPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CloudWatch Logs
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                  - 'logs:DescribeLogStreams'
+                Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/eks/${EnvironmentName}/*'
+              # ECR Access
+              - Effect: Allow
+                Action:
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                  - 'ecr:GetAuthorizationToken'
+                Resource: '*'
+              # RDS Access
+              - Effect: Allow
+                Action:
+                  - 'rds:DescribeDBInstances'
+                  - 'rds:DescribeDBClusters'
+                Resource: '*'
+              # Secrets Manager
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource:
+                  - Fn::ImportValue: !Sub '${EnvironmentName}-rds-secret-arn'
+              # S3 Access
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Sub
+                    - 'arn:aws:s3:::${Bucket}/*'
+                    - Bucket:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+                  - !Sub
+                    - 'arn:aws:s3:::${Bucket}'
+                    - Bucket:
+                        Fn::ImportValue: !Sub '${EnvironmentName}-raw-bucket'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-nodegroup-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # Node Group Security Group
+  NodeGroupSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-eks-nodegroup-sg'
+      GroupDescription: Security group for EKS worker nodes
+      VpcId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
+      SecurityGroupIngress:
+        # Allow nodes to communicate with each other
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref NodeGroupSecurityGroup
+          Description: Allow node to node communication
+        # Allow pods to communicate with cluster API
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId: !Ref EKSClusterSecurityGroup
+          Description: Allow pods to communicate with cluster API
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-nodegroup-sg'
+        - Key: Project
+          Value: medical-robotics-data-platform
+        - Key: !Sub 'kubernetes.io/cluster/${EnvironmentName}-cluster'
+          Value: owned
+
+  # Allow cluster to communicate with nodes
+  ClusterToNodeSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref NodeGroupSecurityGroup
+      IpProtocol: tcp
+      FromPort: 1025
+      ToPort: 65535
+      SourceSecurityGroupId: !Ref EKSClusterSecurityGroup
+      Description: Allow cluster to communicate with nodes
+
+  # Allow nodes to communicate with cluster
+  NodeToClusterSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref EKSClusterSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref NodeGroupSecurityGroup
+      Description: Allow nodes to communicate with cluster API
+
+  # Allow nodes to access RDS
+  RDSIngressFromNodeGroup:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Fn::ImportValue: !Sub '${EnvironmentName}-rds-sg-id'
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref NodeGroupSecurityGroup
+      Description: Allow EKS nodes to access RDS
+
+  # Managed Node Group
+  EKSNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn:
+      - EKSCluster
+    Properties:
+      NodegroupName: !Sub '${EnvironmentName}-nodegroup'
+      ClusterName: !Ref EKSCluster
+      NodeRole: !GetAtt NodeGroupRole.Arn
+      Subnets:
+        - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-1'
+        - Fn::ImportValue: !Sub '${EnvironmentName}-private-subnet-2'
+      ScalingConfig:
+        MinSize: !Ref NodeGroupMinSize
+        MaxSize: !Ref NodeGroupMaxSize
+        DesiredSize: !Ref NodeGroupDesiredSize
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      AmiType: AL2_x86_64
+      DiskSize: 20
+      RemoteAccess:
+        Ec2SshKey: !If [HasSSHKey, !Ref SSHKeyName, !Ref AWS::NoValue]
+      Labels:
+        environment: !Ref EnvironmentName
+        project: medical-robotics-data-platform
+      Tags:
+        Name: !Sub '${EnvironmentName}-eks-node'
+        Project: medical-robotics-data-platform
+        !Sub 'kubernetes.io/cluster/${EnvironmentName}-cluster': owned
+      UpdateConfig:
+        MaxUnavailablePercentage: 33
+
+  # OIDC Provider for IRSA (IAM Roles for Service Accounts)
+  EKSOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: !GetAtt EKSCluster.OpenIdConnectIssuerUrl
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 9e99a48a9960b14926bb7f3b02e22da2b0ab7280
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-eks-oidc'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # CloudWatch Log Group for EKS
+  EKSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/eks/${EnvironmentName}-cluster/cluster'
+      RetentionInDays: 7
+
+  # CloudWatch Alarms
+  NodeGroupHighCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-eks-high-cpu'
+      AlarmDescription: Alert when node group CPU exceeds 80%
+      MetricName: node_cpu_utilization
+      Namespace: ContainerInsights
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EKSCluster
+      TreatMissingData: notBreaching
+
+  NodeGroupHighMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub '${EnvironmentName}-eks-high-memory'
+      AlarmDescription: Alert when node group memory exceeds 80%
+      MetricName: node_memory_utilization
+      Namespace: ContainerInsights
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref EKSCluster
+      TreatMissingData: notBreaching
+
+Conditions:
+  HasSSHKey: !Not [!Equals [!Ref SSHKeyName, '']]
+
+Parameters:
+  SSHKeyName:
+    Description: Optional SSH key for node access
+    Type: String
+    Default: ''
+
+Outputs:
+  ClusterName:
+    Description: EKS Cluster Name
+    Value: !Ref EKSCluster
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-cluster-name'
+
+  ClusterEndpoint:
+    Description: EKS Cluster Endpoint
+    Value: !GetAtt EKSCluster.Endpoint
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-endpoint'
+
+  ClusterSecurityGroup:
+    Description: Security Group ID for EKS Cluster
+    Value: !Ref EKSClusterSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-cluster-sg-id'
+
+  NodeGroupSecurityGroup:
+    Description: Security Group ID for EKS Node Group
+    Value: !Ref NodeGroupSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-nodegroup-sg-id'
+
+  NodeGroupRole:
+    Description: IAM Role ARN for Node Group
+    Value: !GetAtt NodeGroupRole.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-nodegroup-role-arn'
+
+  OIDCProviderArn:
+    Description: OIDC Provider ARN for IRSA
+    Value: !GetAtt EKSOIDCProvider.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-oidc-provider-arn'
+
+  OIDCProviderUrl:
+    Description: OIDC Provider URL
+    Value: !GetAtt EKSCluster.OpenIdConnectIssuerUrl
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-oidc-provider-url'
+
+  ClusterArn:
+    Description: EKS Cluster ARN
+    Value: !GetAtt EKSCluster.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-eks-cluster-arn'
