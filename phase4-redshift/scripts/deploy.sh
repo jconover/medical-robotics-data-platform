@@ -5,6 +5,10 @@
 
 set -e
 
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
+
 # Configuration
 ENVIRONMENT_NAME="${ENVIRONMENT_NAME:-medrobotics}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
@@ -47,7 +51,7 @@ check_prerequisites() {
 
     # Check if Phase 2 is deployed
     if ! aws cloudformation describe-stacks \
-        --stack-name ${ENVIRONMENT_NAME}-vpc \
+        --stack-name ${ENVIRONMENT_NAME}-network \
         --region $AWS_REGION &> /dev/null; then
         error "Phase 2 infrastructure not found. Please deploy Phase 2 first."
         exit 1
@@ -61,7 +65,7 @@ check_prerequisites() {
 package_lambda_functions() {
     header "Packaging Lambda Functions"
 
-    cd etl-functions
+    cd "$PROJECT_DIR/etl-functions"
 
     # Create deployment packages
     info "Creating RDS to Redshift ETL package..."
@@ -76,7 +80,7 @@ package_lambda_functions() {
     pip install -r requirements.txt -t build/telemetry_etl/ --quiet
     cd build/telemetry_etl && zip -r ../../s3_telemetry_to_redshift.zip . > /dev/null && cd ../..
 
-    cd ..
+    cd "$PROJECT_DIR"
     info "Lambda packages created"
     echo ""
 }
@@ -90,20 +94,22 @@ upload_lambda_code() {
         LAMBDA_CODE_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name ${ENVIRONMENT_NAME}-s3 \
             --region $AWS_REGION \
-            --query 'Stacks[0].Outputs[?OutputKey==`ProcessedBucket`].OutputValue' \
+            --query 'Stacks[0].Outputs[?OutputKey==`ProcessedDataBucket`].OutputValue' \
             --output text)
     fi
 
     info "Using S3 bucket: $LAMBDA_CODE_BUCKET"
 
     # Upload Lambda packages
-    aws s3 cp etl-functions/rds_to_redshift_etl.zip \
-        s3://${LAMBDA_CODE_BUCKET}/lambda/rds_to_redshift_etl.zip \
-        --region $AWS_REGION
+    aws s3 cp "$PROJECT_DIR/etl-functions/rds_to_redshift_etl.zip" \
+        "s3://${LAMBDA_CODE_BUCKET}/lambda/rds_to_redshift_etl.zip" \
+        --region "$AWS_REGION" \
+        --sse AES256
 
-    aws s3 cp etl-functions/s3_telemetry_to_redshift.zip \
-        s3://${LAMBDA_CODE_BUCKET}/lambda/s3_telemetry_to_redshift.zip \
-        --region $AWS_REGION
+    aws s3 cp "$PROJECT_DIR/etl-functions/s3_telemetry_to_redshift.zip" \
+        "s3://${LAMBDA_CODE_BUCKET}/lambda/s3_telemetry_to_redshift.zip" \
+        --region "$AWS_REGION" \
+        --sse AES256
 
     info "Lambda code uploaded"
     echo ""
@@ -126,11 +132,11 @@ deploy_redshift() {
     info "Creating Redshift cluster stack..."
     aws cloudformation create-stack \
         --stack-name ${ENVIRONMENT_NAME}-redshift \
-        --template-body file://cloudformation/01-redshift-cluster.yaml \
+        --template-body file://"$PROJECT_DIR/cloudformation/01-redshift-cluster.yaml" \
         --parameters \
             ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME \
             ParameterKey=MasterUserPassword,ParameterValue=$REDSHIFT_PASSWORD \
-            ParameterKey=NodeType,ParameterValue=dc2.large \
+            ParameterKey=NodeType,ParameterValue=ra3.xlplus \
             ParameterKey=NumberOfNodes,ParameterValue=2 \
         --region $AWS_REGION \
         --capabilities CAPABILITY_NAMED_IAM
@@ -151,7 +157,7 @@ deploy_lambda() {
     info "Creating Lambda functions stack..."
     aws cloudformation create-stack \
         --stack-name ${ENVIRONMENT_NAME}-etl-lambda \
-        --template-body file://cloudformation/02-etl-lambda.yaml \
+        --template-body file://"$PROJECT_DIR/cloudformation/02-etl-lambda.yaml" \
         --parameters \
             ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME \
             ParameterKey=LambdaCodeBucket,ParameterValue=$LAMBDA_CODE_BUCKET \
@@ -174,7 +180,7 @@ deploy_step_functions() {
     info "Creating Step Functions stack..."
     aws cloudformation create-stack \
         --stack-name ${ENVIRONMENT_NAME}-step-functions \
-        --template-body file://cloudformation/03-step-functions.yaml \
+        --template-body file://"$PROJECT_DIR/cloudformation/03-step-functions.yaml" \
         --parameters \
             ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME \
         --region $AWS_REGION \
