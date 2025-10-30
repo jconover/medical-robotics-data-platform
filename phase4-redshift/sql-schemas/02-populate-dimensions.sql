@@ -46,11 +46,11 @@ SELECT
         ELSE 4
     END AS fiscal_quarter
 FROM (
-    SELECT '2020-01-01'::DATE + CAST(n AS INTEGER) AS d
+    SELECT '2020-01-01'::DATE + (seq - 1) AS d
     FROM (
-        SELECT ROW_NUMBER() OVER () - 1 AS n
-        FROM dim_robots
-        CROSS JOIN dim_surgeons
+        SELECT ROW_NUMBER() OVER (ORDER BY 1) AS seq
+        FROM pg_catalog.pg_class c1
+        CROSS JOIN pg_catalog.pg_class c2
         LIMIT 3653  -- 10 years + leap days
     )
 ) dates;
@@ -112,13 +112,13 @@ SELECT
 FROM (
     SELECT h AS hour, m AS minute
     FROM (
-        SELECT ROW_NUMBER() OVER () - 1 AS h
-        FROM dim_robots
+        SELECT ROW_NUMBER() OVER (ORDER BY 1) - 1 AS h
+        FROM pg_catalog.pg_class
         LIMIT 24
     ) hours
     CROSS JOIN (
-        SELECT ROW_NUMBER() OVER () - 1 AS m
-        FROM dim_robots
+        SELECT ROW_NUMBER() OVER (ORDER BY 1) - 1 AS m
+        FROM pg_catalog.pg_class
         LIMIT 60
     ) minutes
 ) times;

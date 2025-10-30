@@ -71,13 +71,15 @@ package_lambda_functions() {
     info "Creating RDS to Redshift ETL package..."
     mkdir -p build/rds_etl
     cp rds_to_redshift_etl.py build/rds_etl/
-    pip install -r requirements.txt -t build/rds_etl/ --quiet
+    pip install -r requirements.txt -t build/rds_etl/ --platform manylinux2014_x86_64 --only-binary=:all: --quiet || \
+        pip install -r requirements.txt -t build/rds_etl/ --quiet
     cd build/rds_etl && zip -r ../../rds_to_redshift_etl.zip . > /dev/null && cd ../..
 
     info "Creating Telemetry ETL package..."
     mkdir -p build/telemetry_etl
     cp s3_telemetry_to_redshift.py build/telemetry_etl/
-    pip install -r requirements.txt -t build/telemetry_etl/ --quiet
+    pip install -r requirements.txt -t build/telemetry_etl/ --platform manylinux2014_x86_64 --only-binary=:all: --quiet || \
+        pip install -r requirements.txt -t build/telemetry_etl/ --quiet
     cd build/telemetry_etl && zip -r ../../s3_telemetry_to_redshift.zip . > /dev/null && cd ../..
 
     cd "$PROJECT_DIR"

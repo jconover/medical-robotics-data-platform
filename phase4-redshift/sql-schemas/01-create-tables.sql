@@ -27,8 +27,8 @@ CREATE TABLE dim_date (
     day_of_month SMALLINT NOT NULL ENCODE LZO,
     day_of_week SMALLINT NOT NULL ENCODE LZO,
     day_name VARCHAR(10) NOT NULL ENCODE LZO,
-    is_weekend BOOLEAN NOT NULL ENCODE LZO,
-    is_holiday BOOLEAN DEFAULT FALSE ENCODE LZO,
+    is_weekend BOOLEAN NOT NULL,
+    is_holiday BOOLEAN DEFAULT FALSE,
     fiscal_year SMALLINT NOT NULL ENCODE LZO,
     fiscal_quarter SMALLINT NOT NULL ENCODE LZO
 )
@@ -46,7 +46,7 @@ CREATE TABLE dim_time (
     hour_12 SMALLINT NOT NULL ENCODE LZO,
     am_pm VARCHAR(2) NOT NULL ENCODE LZO,
     time_of_day VARCHAR(20) NOT NULL ENCODE LZO, -- Morning, Afternoon, Evening, Night
-    business_hours BOOLEAN NOT NULL ENCODE LZO
+    business_hours BOOLEAN NOT NULL
 )
 DISTSTYLE ALL
 SORTKEY (time_key);
@@ -65,7 +65,7 @@ CREATE TABLE dim_facilities (
     -- SCD2 fields
     effective_date DATE NOT NULL ENCODE LZO,
     expiration_date DATE ENCODE LZO,
-    is_current BOOLEAN NOT NULL DEFAULT TRUE ENCODE LZO
+    is_current BOOLEAN NOT NULL DEFAULT TRUE
 )
 DISTSTYLE ALL
 SORTKEY (facility_id, effective_date);
@@ -82,7 +82,7 @@ CREATE TABLE dim_surgeons (
     -- SCD2 fields
     effective_date DATE NOT NULL ENCODE LZO,
     expiration_date DATE ENCODE LZO,
-    is_current BOOLEAN NOT NULL DEFAULT TRUE ENCODE LZO
+    is_current BOOLEAN NOT NULL DEFAULT TRUE
 )
 DISTSTYLE ALL
 SORTKEY (surgeon_id, effective_date);
@@ -106,7 +106,7 @@ CREATE TABLE dim_robots (
     -- SCD2 fields
     effective_date DATE NOT NULL ENCODE LZO,
     expiration_date DATE ENCODE LZO,
-    is_current BOOLEAN NOT NULL DEFAULT TRUE ENCODE LZO
+    is_current BOOLEAN NOT NULL DEFAULT TRUE
 )
 DISTSTYLE KEY
 DISTKEY (robot_key)
@@ -148,7 +148,7 @@ CREATE TABLE fact_procedures (
     complication_level VARCHAR(50) ENCODE LZO,
     hospital_stay_days INTEGER ENCODE LZO,
     patient_satisfaction_score DECIMAL(3,1) ENCODE LZO,
-    readmission_30day BOOLEAN ENCODE LZO,
+    readmission_30day BOOLEAN,
 
     -- Metadata
     status VARCHAR(50) NOT NULL DEFAULT 'completed' ENCODE LZO,
@@ -185,7 +185,7 @@ CREATE TABLE fact_procedure_telemetry (
     arm_rotation_z DECIMAL(10,4) ENCODE LZO,
     force_feedback DECIMAL(10,4) ENCODE LZO,
     tool_type VARCHAR(100) ENCODE LZO,
-    tool_active BOOLEAN ENCODE LZO,
+    tool_active BOOLEAN,
     camera_zoom DECIMAL(5,2) ENCODE LZO,
     lighting_level INTEGER ENCODE LZO,
 
