@@ -105,6 +105,53 @@ main() {
     info ""
     info "Starting cleanup..."
 
+    # Check for dependent stacks
+    info "Checking for dependent stacks from Phase 3, 4, and 5..."
+    DEPENDENT_STACKS=()
+
+    for STACK in \
+        "${ENVIRONMENT_NAME}-ecs-cluster" \
+        "${ENVIRONMENT_NAME}-ecs-services" \
+        "${ENVIRONMENT_NAME}-ecs-tasks" \
+        "${ENVIRONMENT_NAME}-alb" \
+        "${ENVIRONMENT_NAME}-redshift" \
+        "${ENVIRONMENT_NAME}-etl-lambda" \
+        "${ENVIRONMENT_NAME}-step-functions" \
+        "${ENVIRONMENT_NAME}-eks"; do
+
+        if aws cloudformation describe-stacks --stack-name "$STACK" --region "$AWS_REGION" &> /dev/null; then
+            DEPENDENT_STACKS+=("$STACK")
+        fi
+    done
+
+    if [ ${#DEPENDENT_STACKS[@]} -gt 0 ]; then
+        error ""
+        error "=========================================="
+        error "Cannot delete Phase 2 infrastructure!"
+        error "=========================================="
+        error ""
+        error "The following dependent stacks still exist:"
+        for STACK in "${DEPENDENT_STACKS[@]}"; do
+            error "  - $STACK"
+        done
+        error ""
+        error "CloudFormation will prevent Phase 2 deletion because these"
+        error "stacks depend on Phase 2 exports (VPC, subnets, security groups, etc.)"
+        error ""
+        error "You must delete dependent stacks first:"
+        error ""
+        error "Option 1 (Recommended): Use the master cleanup script:"
+        error "  cd ../.. && ./scripts/cleanup-all-phases.sh"
+        error ""
+        error "Option 2: Delete phases manually in reverse order:"
+        error "  Phase 5 (EKS) → Phase 4 (Redshift) → Phase 3 (ECS) → Phase 2"
+        error ""
+        exit 1
+    fi
+
+    info "✓ No dependent stacks found. Safe to proceed."
+    echo ""
+
     # Empty S3 buckets first
     empty_s3_buckets
 

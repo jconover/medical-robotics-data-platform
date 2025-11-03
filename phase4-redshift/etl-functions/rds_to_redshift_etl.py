@@ -104,7 +104,7 @@ def load_dimension_surgeons():
 
     try:
         # Extract distinct surgeons from RDS
-        rds_cursor = rds_conn.cursor()
+        rds_cursor = rds_conn.cursor(cursor_factory=RealDictCursor)
         rds_cursor.execute("""
             SELECT DISTINCT
                 surgeon_id,
@@ -207,7 +207,7 @@ def load_dimension_robots():
 
     try:
         # Extract robots from RDS
-        rds_cursor = rds_conn.cursor()
+        rds_cursor = rds_conn.cursor(cursor_factory=RealDictCursor)
         rds_cursor.execute("""
             SELECT
                 r.robot_id,
@@ -215,19 +215,18 @@ def load_dimension_robots():
                 r.robot_model,
                 r.manufacturer,
                 r.facility_id,
-                r.install_date,
-                r.software_version,
-                r.hardware_revision,
+                r.installation_date,
+                r.firmware_version,
                 r.status,
                 r.last_maintenance_date,
                 COUNT(p.procedure_id) as total_procedures_count,
                 COALESCE(SUM(p.duration_minutes), 0) / 60.0 as total_operating_hours,
-                r.install_date as effective_date
+                r.installation_date as effective_date
             FROM surgical_robots r
             LEFT JOIN surgical_procedures p ON r.robot_id = p.robot_id
             GROUP BY r.robot_id, r.robot_serial_number, r.robot_model,
-                     r.manufacturer, r.facility_id, r.install_date,
-                     r.software_version, r.hardware_revision, r.status,
+                     r.manufacturer, r.facility_id, r.installation_date,
+                     r.firmware_version, r.status,
                      r.last_maintenance_date
         """)
         robots = rds_cursor.fetchall()
@@ -247,9 +246,8 @@ def load_dimension_robots():
                 robot_model VARCHAR(100),
                 manufacturer VARCHAR(100),
                 facility_id VARCHAR(50),
-                install_date DATE,
-                software_version VARCHAR(50),
-                hardware_revision VARCHAR(50),
+                installation_date DATE,
+                firmware_version VARCHAR(50),
                 status VARCHAR(50),
                 last_maintenance_date DATE,
                 total_procedures_count INTEGER,
@@ -281,7 +279,7 @@ def load_dimension_robots():
 
             INSERT INTO dim_robots (
                 robot_id, robot_serial_number, robot_model, manufacturer,
-                facility_key, install_date, software_version, hardware_revision,
+                facility_key, installation_date, firmware_version,
                 status, last_maintenance_date, total_procedures_count,
                 total_operating_hours, effective_date, expiration_date, is_current
             )
@@ -291,9 +289,8 @@ def load_dimension_robots():
                 s.robot_model,
                 s.manufacturer,
                 f.facility_key,
-                s.install_date,
-                s.software_version,
-                s.hardware_revision,
+                s.installation_date,
+                s.firmware_version,
                 s.status,
                 s.last_maintenance_date,
                 s.total_procedures_count,
@@ -335,39 +332,53 @@ def load_fact_procedures(start_date=None, end_date=None):
 
     try:
         # Extract procedures from RDS
-        rds_cursor = rds_conn.cursor()
-        rds_cursor.execute("""
-            SELECT
-                p.procedure_id,
-                p.robot_id,
-                p.surgeon_id,
-                r.facility_id,
-                TO_CHAR(p.start_time, 'YYYYMMDD')::INTEGER as start_date_key,
-                EXTRACT(HOUR FROM p.start_time)::INTEGER * 10000 +
-                EXTRACT(MINUTE FROM p.start_time)::INTEGER * 100 as start_time_key,
-                TO_CHAR(p.end_time, 'YYYYMMDD')::INTEGER as end_date_key,
-                EXTRACT(HOUR FROM p.end_time)::INTEGER * 10000 +
-                EXTRACT(MINUTE FROM p.end_time)::INTEGER * 100 as end_time_key,
-                p.procedure_type,
-                p.procedure_category,
-                p.patient_id,
-                p.patient_age,
-                p.patient_gender,
-                p.duration_minutes,
-                p.complexity_score,
-                o.success_status,
-                o.blood_loss_ml,
-                o.complication_level,
-                o.hospital_stay_days,
-                o.patient_satisfaction_score,
-                o.readmission_30day,
-                p.status
-            FROM surgical_procedures p
-            LEFT JOIN surgical_robots r ON p.robot_id = r.robot_id
-            LEFT JOIN procedure_outcomes o ON p.procedure_id = o.procedure_id
-            WHERE p.start_time >= %s AND p.start_time < %s
-        """, (start_date, end_date))
+        rds_cursor = rds_conn.cursor(cursor_factory=RealDictCursor)
+
+        print(f"Querying procedures from {start_date} to {end_date}")
+
+        try:
+            rds_cursor.execute("""
+                SELECT
+                    p.procedure_id,
+                    p.robot_id,
+                    p.surgeon_id,
+                    r.facility_id,
+                    TO_CHAR(p.start_time, 'YYYYMMDD')::INTEGER as start_date_key,
+                    EXTRACT(HOUR FROM p.start_time)::INTEGER * 10000 +
+                    EXTRACT(MINUTE FROM p.start_time)::INTEGER * 100 as start_time_key,
+                    TO_CHAR(p.end_time, 'YYYYMMDD')::INTEGER as end_date_key,
+                    EXTRACT(HOUR FROM p.end_time)::INTEGER * 10000 +
+                    EXTRACT(MINUTE FROM p.end_time)::INTEGER * 100 as end_time_key,
+                    p.procedure_type,
+                    p.procedure_category,
+                    p.patient_id,
+                    p.patient_age,
+                    p.patient_gender,
+                    p.duration_minutes,
+                    p.complexity_score,
+                    o.success_status,
+                    o.blood_loss_ml,
+                    CASE
+                        WHEN o.complications IS NULL OR o.complications = '' THEN 'None'
+                        WHEN o.complications ILIKE '%severe%' OR o.complications ILIKE '%major%' THEN 'Severe'
+                        WHEN o.complications ILIKE '%moderate%' THEN 'Moderate'
+                        ELSE 'Minor'
+                    END as complication_level,
+                    o.hospital_stay_days,
+                    o.patient_satisfaction_score,
+                    o.readmission_30day,
+                    p.status
+                FROM surgical_procedures p
+                LEFT JOIN surgical_robots r ON p.robot_id = r.robot_id
+                LEFT JOIN procedure_outcomes o ON p.procedure_id = o.procedure_id
+                WHERE p.start_time >= %s AND p.start_time < %s
+            """, (start_date, end_date))
+        except Exception as e:
+            print(f"Query error: {type(e).__name__}: {str(e)}")
+            raise
+
         procedures = rds_cursor.fetchall()
+        print(f"Fetched {len(procedures)} procedures")
 
         # Export to S3
         s3_path = export_to_s3_csv(procedures, f'procedures_{start_date}_{end_date}.csv')

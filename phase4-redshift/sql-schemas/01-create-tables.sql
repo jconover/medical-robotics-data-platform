@@ -96,10 +96,9 @@ CREATE TABLE dim_robots (
     robot_model VARCHAR(100) NOT NULL ENCODE LZO,
     manufacturer VARCHAR(100) ENCODE LZO,
     facility_key INTEGER ENCODE LZO,
-    install_date DATE ENCODE LZO,
-    software_version VARCHAR(50) ENCODE LZO,
-    hardware_revision VARCHAR(50) ENCODE LZO,
-    status VARCHAR(50) ENCODE LZO, -- active, maintenance, retired
+    installation_date DATE ENCODE LZO,
+    firmware_version VARCHAR(50) ENCODE LZO,
+    status VARCHAR(50) ENCODE LZO, -- operational, maintenance, retired
     last_maintenance_date DATE ENCODE LZO,
     total_procedures_count INTEGER DEFAULT 0 ENCODE LZO,
     total_operating_hours DECIMAL(10,2) DEFAULT 0 ENCODE LZO,

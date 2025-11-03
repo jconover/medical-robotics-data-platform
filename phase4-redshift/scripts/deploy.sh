@@ -69,16 +69,26 @@ package_lambda_functions() {
 
     # Create deployment packages
     info "Creating RDS to Redshift ETL package..."
+    rm -rf build/rds_etl
     mkdir -p build/rds_etl
     cp rds_to_redshift_etl.py build/rds_etl/
-    pip install -r requirements.txt -t build/rds_etl/ --platform manylinux2014_x86_64 --only-binary=:all: --quiet || \
+    pip install -r requirements.txt -t build/rds_etl/ \
+        --platform manylinux2014_x86_64 \
+        --only-binary=:all: \
+        --python-version 3.11 \
+        --upgrade --quiet || \
         pip install -r requirements.txt -t build/rds_etl/ --quiet
     cd build/rds_etl && zip -r ../../rds_to_redshift_etl.zip . > /dev/null && cd ../..
 
     info "Creating Telemetry ETL package..."
+    rm -rf build/telemetry_etl
     mkdir -p build/telemetry_etl
     cp s3_telemetry_to_redshift.py build/telemetry_etl/
-    pip install -r requirements.txt -t build/telemetry_etl/ --platform manylinux2014_x86_64 --only-binary=:all: --quiet || \
+    pip install -r requirements.txt -t build/telemetry_etl/ \
+        --platform manylinux2014_x86_64 \
+        --only-binary=:all: \
+        --python-version 3.11 \
+        --upgrade --quiet || \
         pip install -r requirements.txt -t build/telemetry_etl/ --quiet
     cd build/telemetry_etl && zip -r ../../s3_telemetry_to_redshift.zip . > /dev/null && cd ../..
 

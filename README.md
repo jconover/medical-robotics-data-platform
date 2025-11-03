@@ -190,6 +190,46 @@ Medical robotics provides a compelling use case because:
 - Create production-quality infrastructure code
 - Build a portfolio piece that stands out
 
+## Cleanup & Teardown
+
+### Complete Cleanup (All Phases) - Recommended
+
+Delete all infrastructure in the correct dependency order:
+
+```bash
+export ENVIRONMENT_NAME="medrobotics"
+export AWS_REGION="us-east-1"
+
+# Delete everything
+./scripts/cleanup-all-phases.sh
+
+# Verify complete deletion
+./scripts/verify-cleanup.sh
+```
+
+**What it deletes (in order):**
+1. Phase 5: EKS cluster (if exists)
+2. Phase 4: Redshift, Lambda ETL, Step Functions
+3. Phase 3: ECS services, ALB, ECR images
+4. Phase 2: VPC, RDS, S3, IAM, Security Groups
+
+### Individual Phase Cleanup
+
+⚠️ **Important:** You must delete phases in reverse order (5 → 4 → 3 → 2) due to CloudFormation cross-stack dependencies.
+
+```bash
+# Phase 4 (Redshift)
+cd phase4-redshift/scripts && ./cleanup.sh
+
+# Phase 3 (ECS)
+cd phase3-ecs/scripts && ./cleanup-ecs.sh
+
+# Phase 2 (Infrastructure) - Will fail if Phase 3/4 still exist
+cd phase2-infrastructure/scripts && ./cleanup-infrastructure.sh
+```
+
+**For detailed instructions and troubleshooting, see [CLEANUP_GUIDE.md](./CLEANUP_GUIDE.md).**
+
 ## Future Enhancements
 
 Potential additions:
