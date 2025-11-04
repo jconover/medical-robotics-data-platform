@@ -46,7 +46,7 @@ check_prerequisites() {
     fi
 
     # Check if RDS secret exists in Secrets Manager
-    SECRET_NAME="${ENVIRONMENT_NAME}-rds-credentials"
+    SECRET_NAME="${ENVIRONMENT_NAME}/rds/credentials"
     if ! aws secretsmanager describe-secret --secret-id "$SECRET_NAME" --region "$AWS_REGION" &> /dev/null; then
         error "RDS secret '$SECRET_NAME' not found in Secrets Manager. Please deploy Phase 2 RDS stack first."
     fi
