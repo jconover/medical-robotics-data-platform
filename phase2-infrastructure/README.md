@@ -263,11 +263,11 @@ RAW_BUCKET=$(aws cloudformation describe-stacks \
 
 # Upload telemetry data from Phase 1
 aws s3 cp ../../phase1-data-model/data_generators/sample_data/procedure_telemetry.json \
-  s3://$RAW_BUCKET/telemetry/procedure_telemetry.json
+  s3://$RAW_BUCKET/telemetry/procedure_telemetry.json --sse AES256
 
 # Upload CSV files
 aws s3 cp ../../phase1-data-model/data_generators/sample_data/surgical_robots.csv \
-  s3://$RAW_BUCKET/robots/surgical_robots.csv
+  s3://$RAW_BUCKET/robots/surgical_robots.csv --sse AES256
 ```
 
 ### 4. Load Data into RDS (from Bastion)
