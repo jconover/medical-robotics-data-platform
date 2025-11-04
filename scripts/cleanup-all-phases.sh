@@ -177,10 +177,37 @@ for BUCKET_SUFFIX in raw-data processed-data analytics logs backups; do
     BUCKET="${ENVIRONMENT_NAME}-${BUCKET_SUFFIX}-${ACCOUNT_ID}"
     if aws s3 ls "s3://${BUCKET}" &> /dev/null 2>&1; then
         info "Emptying bucket: $BUCKET"
-        aws s3 rm "s3://${BUCKET}" --recursive --region "$AWS_REGION" 2>/dev/null || warn "Failed to empty $BUCKET"
+
+        # Remove all current objects
+        aws s3 rm "s3://${BUCKET}" --recursive --region "$AWS_REGION" 2>/dev/null || warn "Failed to remove current objects from $BUCKET"
+
+        # Remove all versioned objects and delete markers
+        info "Removing all versions and delete markers from: $BUCKET"
+        aws s3api delete-objects \
+            --bucket "$BUCKET" \
+            --delete "$(aws s3api list-object-versions \
+                --bucket "$BUCKET" \
+                --output json \
+                --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+                --max-items 1000)" \
+            --region "$AWS_REGION" \
+            2>/dev/null || warn "No versions to delete in $BUCKET"
+
+        # Remove delete markers
+        aws s3api delete-objects \
+            --bucket "$BUCKET" \
+            --delete "$(aws s3api list-object-versions \
+                --bucket "$BUCKET" \
+                --output json \
+                --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+                --max-items 1000)" \
+            --region "$AWS_REGION" \
+            2>/dev/null || warn "No delete markers to remove in $BUCKET"
+
+        info "✓ Bucket $BUCKET emptied completely"
     fi
 done
-info "✓ S3 buckets emptied"
+info "✓ All S3 buckets emptied"
 echo ""
 
 # Delete Phase 2 stacks in reverse dependency order

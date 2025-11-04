@@ -44,6 +44,39 @@ Kubernetes Alternative (Phase 5)
     └── EKS cluster with Helm charts
 ```
 
+## Pre-Deployment Validation
+
+**IMPORTANT**: Always run the pre-deployment check before deploying to avoid conflicts:
+
+```bash
+export ENVIRONMENT_NAME="medrobotics"
+export AWS_REGION="us-east-1"
+
+./scripts/pre-deployment-check.sh
+```
+
+**What it checks:**
+- CloudFormation stacks that would conflict
+- S3 buckets with matching names
+- ECR repositories
+- RDS instances
+- Redshift clusters
+- VPCs and networking resources
+- ECS clusters
+- Lambda functions
+- Application Load Balancers
+- IAM roles and Secrets Manager
+
+**Exit codes:**
+- `0` = Safe to deploy
+- `1` = Conflicts found, must resolve first
+
+**If conflicts are found**, use the provided resolution commands or run:
+```bash
+./scripts/fix-existing-buckets.sh      # For S3 bucket conflicts
+./scripts/cleanup-all-phases.sh        # For all other conflicts
+```
+
 ## Common Commands
 
 ### Phase 1: Data Generation
@@ -69,6 +102,9 @@ ls -lh sample_data/
 ### Phase 2: Infrastructure Deployment
 
 ```bash
+# IMPORTANT: Run pre-deployment check first!
+./scripts/pre-deployment-check.sh
+
 cd phase2-infrastructure/scripts
 
 # Set required environment variables

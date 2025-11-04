@@ -110,20 +110,30 @@ Resources:
         - Key: Project
           Value: medical-robotics-data-platform
 
-  # Bastion Host Security Group (for administrative access)
+  # Bastion Host Security Group (for administrative access via SSM)
   BastionSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: !Sub '${EnvironmentName}-bastion-sg'
-      GroupDescription: Security group for bastion host
+      GroupDescription: Security group for bastion host (SSM Session Manager only, no SSH)
       VpcId:
         Fn::ImportValue: !Sub '${EnvironmentName}-vpc-id'
-      SecurityGroupIngress:
+      SecurityGroupEgress:
         - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
+          FromPort: 443
+          ToPort: 443
           CidrIp: 0.0.0.0/0
-          Description: Allow SSH from anywhere (restrict in production)
+          Description: Allow HTTPS for SSM and package downloads
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.5.0.0/16
+          Description: Allow PostgreSQL to RDS
+        - IpProtocol: tcp
+          FromPort: 5439
+          ToPort: 5439
+          CidrIp: 10.5.0.0/16
+          Description: Allow Redshift connections
       Tags:
         - Key: Name
           Value: !Sub '${EnvironmentName}-bastion-sg'

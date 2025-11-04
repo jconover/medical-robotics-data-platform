@@ -307,6 +307,60 @@ Resources:
         - !Ref DataRouteTable2
       VpcEndpointType: Gateway
 
+  # CloudWatch Log Group for VPC Flow Logs
+  VPCFlowLogsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/vpc/${EnvironmentName}'
+      RetentionInDays: 30
+
+  # IAM Role for VPC Flow Logs
+  VPCFlowLogsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-vpc-flow-logs-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                Resource: !GetAtt VPCFlowLogsLogGroup.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpc-flow-logs-role'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
+  # VPC Flow Logs (for HIPAA compliance and network monitoring)
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      ResourceType: VPC
+      ResourceId: !Ref VPC
+      TrafficType: ALL
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref VPCFlowLogsLogGroup
+      DeliverLogsPermissionArn: !GetAtt VPCFlowLogsRole.Arn
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-vpc-flow-log'
+        - Key: Project
+          Value: medical-robotics-data-platform
+
 Outputs:
   VPC:
     Description: VPC ID

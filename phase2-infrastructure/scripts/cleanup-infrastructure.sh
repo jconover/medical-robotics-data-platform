@@ -66,7 +66,34 @@ empty_s3_buckets() {
     for BUCKET in "${BUCKETS[@]}"; do
         if aws s3 ls "s3://$BUCKET" &> /dev/null; then
             info "Emptying bucket: $BUCKET"
-            aws s3 rm "s3://$BUCKET" --recursive || warn "Failed to empty bucket $BUCKET"
+
+            # Remove all objects (current versions)
+            aws s3 rm "s3://$BUCKET" --recursive || warn "Failed to remove current objects from $BUCKET"
+
+            # Remove all versioned objects and delete markers
+            info "Removing all versions and delete markers from: $BUCKET"
+            aws s3api delete-objects \
+                --bucket "$BUCKET" \
+                --delete "$(aws s3api list-object-versions \
+                    --bucket "$BUCKET" \
+                    --output json \
+                    --query '{Objects: Versions[].{Key:Key,VersionId:VersionId}}' \
+                    --max-items 1000)" \
+                2>/dev/null || warn "No versions to delete in $BUCKET"
+
+            # Remove delete markers
+            aws s3api delete-objects \
+                --bucket "$BUCKET" \
+                --delete "$(aws s3api list-object-versions \
+                    --bucket "$BUCKET" \
+                    --output json \
+                    --query '{Objects: DeleteMarkers[].{Key:Key,VersionId:VersionId}}' \
+                    --max-items 1000)" \
+                2>/dev/null || warn "No delete markers to remove in $BUCKET"
+
+            info "Bucket $BUCKET emptied successfully"
+        else
+            warn "Bucket $BUCKET does not exist. Skipping..."
         fi
     done
 }

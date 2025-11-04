@@ -18,10 +18,6 @@ Parameters:
     Type: String
     Default: ''
 
-  RDSPassword:
-    Description: RDS database password
-    Type: String
-    NoEcho: true
 
 Resources:
   # Data Ingestion Task Definition
@@ -63,10 +59,14 @@ Resources:
                 Fn::ImportValue: !Sub '${EnvironmentName}-rds-dbname'
             - Name: RDS_USER
               Value: dbadmin
-            - Name: RDS_PASSWORD
-              Value: !Ref RDSPassword
             - Name: PORT
               Value: '8080'
+          Secrets:
+            - Name: RDS_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn:
+                    Fn::ImportValue: !Sub '${EnvironmentName}-rds-secret-arn'
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -127,10 +127,14 @@ Resources:
                 Fn::ImportValue: !Sub '${EnvironmentName}-rds-dbname'
             - Name: RDS_USER
               Value: dbadmin
-            - Name: RDS_PASSWORD
-              Value: !Ref RDSPassword
             - Name: PORT
               Value: '5000'
+          Secrets:
+            - Name: RDS_PASSWORD
+              ValueFrom: !Sub
+                - '${SecretArn}:password::'
+                - SecretArn:
+                    Fn::ImportValue: !Sub '${EnvironmentName}-rds-secret-arn'
           LogConfiguration:
             LogDriver: awslogs
             Options:
