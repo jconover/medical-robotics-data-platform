@@ -8,7 +8,6 @@ set -e
 # Configuration
 ENVIRONMENT_NAME="${ENVIRONMENT_NAME:-medrobotics}"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-RDS_PASSWORD="${RDS_PASSWORD}"
 
 # Colors
 GREEN='\033[0;32m'
@@ -41,13 +40,15 @@ check_prerequisites() {
         error "Docker is not installed"
     fi
 
-    if [ -z "$RDS_PASSWORD" ]; then
-        error "RDS_PASSWORD environment variable is not set"
-    fi
-
     # Check if Phase 2 infrastructure exists
     if ! aws cloudformation describe-stacks --stack-name "${ENVIRONMENT_NAME}-network" --region "$AWS_REGION" &> /dev/null; then
         error "Phase 2 infrastructure not found. Please deploy Phase 2 first."
+    fi
+
+    # Check if RDS secret exists in Secrets Manager
+    SECRET_NAME="${ENVIRONMENT_NAME}-rds-credentials"
+    if ! aws secretsmanager describe-secret --secret-id "$SECRET_NAME" --region "$AWS_REGION" &> /dev/null; then
+        error "RDS secret '$SECRET_NAME' not found in Secrets Manager. Please deploy Phase 2 RDS stack first."
     fi
 
     info "Prerequisites check passed!"
@@ -133,7 +134,7 @@ main() {
     deploy_stack \
         "${ENVIRONMENT_NAME}-ecs-tasks" \
         "$CF_DIR/03-ecs-task-definitions.yaml" \
-        "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME ParameterKey=RDSPassword,ParameterValue=$RDS_PASSWORD"
+        "ParameterKey=EnvironmentName,ParameterValue=$ENVIRONMENT_NAME"
 
     # Step 4: Deploy ECS Services
     info ""

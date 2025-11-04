@@ -137,7 +137,7 @@ export AWS_REGION="us-east-1"
 ./build-and-push.sh
 
 # Deploy ECS cluster, ALB, and services
-export RDS_PASSWORD="YourSecurePassword123"
+# Note: RDS password is automatically retrieved from AWS Secrets Manager
 ./deploy-ecs.sh
 
 # Get ALB URL and test services
